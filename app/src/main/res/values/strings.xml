@@ -1,6 +1,41 @@
-<?xml version="1.0" encoding="utf-8"?>
-<resources>
-    <string name="app_name">CopyM</string>
-    <string name="mic_permission_rationale">Для работы голосового ассистента необходим доступ к микрофону</string>
-    <string name="notification_permission_rationale">Для отображения статуса сессии необходимы уведомления</string>
+resources>
+    <!-- ═══ Translator Screen ═══ -->
+    <string name="translator_title">Live Translator</string>
+
+    <!-- Status -->
+    <string name="translator_status_idle">Нажмите, чтобы начать</string>
+    <string name="translator_status_ready">Готов</string>
+    <string name="translator_status_listening">Слушаю</string>
+    <string name="translator_status_speaking">Перевод</string>
+
+    <!-- Languages -->
+    <string name="translator_lang_user">Ваш язык</string>
+    <string name="translator_lang_target">Немецкий</string>
+    <string name="translator_lang_codes_user">RU · UA</string>
+    <string name="translator_lang_code_target">DE</string>
+
+    <!-- Empty hint -->
+    <string name="translator_hint_idle_title">Голосовой переводчик</string>
+    <string name="translator_hint_idle_subtitle">Русский · Український · Deutsch\nМгновенный голосовой перевод</string>
+    <string name="translator_hint_active_title">Говорите в любой момент</string>
+    <string name="translator_hint_active_subtitle">Перевод появится здесь и прозвучит вслух</string>
+
+    <!-- Bubbles -->
+    <string name="translator_bubble_you_speaking">Вы говорите…</string>
+    <string name="translator_bubble_you">Вы</string>
+    <string name="translator_bubble_translation">Перевод</string>
+
+    <!-- Buttons -->
+    <string name="translator_button_start">Старт</string>
+    <string name="translator_button_stop">Стоп</string>
+
+    <!-- Content descriptions -->
+    <string name="cd_back">Назад</string>
+    <string name="cd_mic_start">Начать перевод</string>
+    <string name="cd_mic_stop">Остановить перевод</string>
+
+    <!-- Tutorial steps -->
+    <string name="translator_tutorial_step1">Нажмите кнопку микрофона</string>
+    <string name="translator_tutorial_step2">Говорите естественно</string>
+    <string name="translator_tutorial_step3">Слушайте перевод</string>
 </resources>
