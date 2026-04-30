@@ -568,36 +568,45 @@ class LearnCoreViewModel @Inject constructor(
             session.systemInstruction
         }
 
+        // v3.9: per-session tuning. Translator получает максимально агрессивные
+        // настройки скорости — VAD быстрый, temperature низкая, токенов мало.
+        val isTranslator = session.id == "translator"
+
         val (silenceMs, prefixMs, temp) = when (session.id) {
-            // v3.9: агрессивный VAD для translator — быстрее закрываем turn
-            "translator"   -> Triple(400, 100, 0.1f)
+            "translator"   -> Triple(350, 80, 0.05f)    // было 600/200/0.15
             "a1_situation" -> Triple(1000, 300, cachedSettings.temperature)
             "a1_review"    -> Triple(1000, 300, cachedSettings.temperature)
             else           -> Triple(1000, 300, cachedSettings.temperature)
         }
 
-        val finalSilenceMs = if (cachedSettings.vadSilenceTimeoutMs > 0)
+        val finalSilenceMs = if (cachedSettings.vadSilenceTimeoutMs > 0 && !isTranslator)
             maxOf(cachedSettings.vadSilenceTimeoutMs, 500)
         else silenceMs
 
-        val finalLanguageCode = if (session.id == "translator") "" else cachedSettings.languageCode
+        val finalLanguageCode = if (isTranslator) "" else cachedSettings.languageCode
+
+        // Translator: быстрый голос Puck, минимум токенов, без thinking.
+        val finalVoiceId = if (isTranslator) "Puck" else cachedSettings.voiceId
+        val finalMaxTokens = if (isTranslator) 512 else cachedSettings.maxOutputTokens
+        val finalTopP = if (isTranslator) 0.8f else cachedSettings.topP
+        val finalTopK = if (isTranslator) 20 else cachedSettings.topK
 
         return SessionConfig(
             model = cachedSettings.model,
             temperature = temp,
-            topP = cachedSettings.topP,
-            topK = cachedSettings.topK,
-            maxOutputTokens = cachedSettings.maxOutputTokens,
+            topP = finalTopP,
+            topK = finalTopK,
+            maxOutputTokens = finalMaxTokens,
             presencePenalty = cachedSettings.presencePenalty,
             frequencyPenalty = cachedSettings.frequencyPenalty,
-            voiceId = cachedSettings.voiceId,
+            voiceId = finalVoiceId,
             languageCode = finalLanguageCode,
             latencyProfile = profile,
             autoActivityDetection = cachedSettings.enableServerVad,
-            vadStartSensitivity = if (session.id == "translator") "START_SENSITIVITY_HIGH"
+            vadStartSensitivity = if (isTranslator) "START_SENSITIVITY_HIGH"
                 else if (cachedSettings.vadStartOfSpeechSensitivity > 0.5f) "START_SENSITIVITY_HIGH"
                 else "START_SENSITIVITY_LOW",
-            vadEndSensitivity = if (session.id == "translator") "END_SENSITIVITY_HIGH"
+            vadEndSensitivity = if (isTranslator) "END_SENSITIVITY_HIGH"
                 else if (cachedSettings.vadEndOfSpeechSensitivity > 0.5f) "END_SENSITIVITY_HIGH"
                 else "END_SENSITIVITY_LOW",
             vadSilenceDurationMs = finalSilenceMs,
@@ -614,8 +623,8 @@ class LearnCoreViewModel @Inject constructor(
         ).also {
             logger.d(
                 "Learn: config for ${session.id}: silence=${finalSilenceMs}ms, " +
-                    "prefix=${prefixMs}ms, temp=$temp, outputTr=${cachedSettings.outputTranscription}, " +
-                    "garbageSuppress=$TRANSLATOR_SUPPRESS_SHORT_ASR_GARBAGE"
+                    "prefix=${prefixMs}ms, temp=$temp, voice=$finalVoiceId, " +
+                    "maxTok=$finalMaxTokens, outputTr=${cachedSettings.outputTranscription}"
             )
         }
     }
