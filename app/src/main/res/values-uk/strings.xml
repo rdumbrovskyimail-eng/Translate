@@ -1,0 +1,33 @@
+<resources>
+    <string name="translator_title">Live Translator</string>
+
+    <string name="translator_status_idle">Натисніть, щоб почати</string>
+    <string name="translator_status_ready">Готовий</string>
+    <string name="translator_status_listening">Слухаю</string>
+    <string name="translator_status_speaking">Переклад</string>
+
+    <string name="translator_lang_user">Ваша мова</string>
+    <string name="translator_lang_target">Німецька</string>
+    <string name="translator_lang_codes_user">RU · UA</string>
+    <string name="translator_lang_code_target">DE</string>
+
+    <string name="translator_hint_idle_title">Голосовий перекладач</string>
+    <string name="translator_hint_idle_subtitle">Русский · Український · Deutsch\nМиттєвий голосовий переклад</string>
+    <string name="translator_hint_active_title">Говоріть будь-коли</string>
+    <string name="translator_hint_active_subtitle">Переклад з\'явиться тут і прозвучить уголос</string>
+
+    <string name="translator_bubble_you_speaking">Ви говорите…</string>
+    <string name="translator_bubble_you">Ви</string>
+    <string name="translator_bubble_translation">Переклад</string>
+
+    <string name="translator_button_start">Старт</string>
+    <string name="translator_button_stop">Стоп</string>
+
+    <string name="cd_back">Назад</string>
+    <string name="cd_mic_start">Почати переклад</string>
+    <string name="cd_mic_stop">Зупинити переклад</string>
+
+    <string name="translator_tutorial_step1">Натисніть кнопку мікрофона</string>
+    <string name="translator_tutorial_step2">Говоріть природно</string>
+    <string name="translator_tutorial_step3">Слухайте переклад</string>
+</resources>
