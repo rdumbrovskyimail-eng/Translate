@@ -11,17 +11,17 @@ resources>
     <!-- Languages -->
     <string name="translator_lang_user">Ваш язык</string>
     <string name="translator_lang_target">Немецкий</string>
-    <string name="translator_lang_codes_user">RU · UA</string>
+    <string name="translator_lang_codes_user">RU &#xB7; UA</string>
     <string name="translator_lang_code_target">DE</string>
 
     <!-- Empty hint -->
     <string name="translator_hint_idle_title">Голосовой переводчик</string>
-    <string name="translator_hint_idle_subtitle">Русский · Український · Deutsch\nМгновенный голосовой перевод</string>
+    <string name="translator_hint_idle_subtitle">Русский &#xB7; Український &#xB7; Deutsch\nМгновенный голосовой перевод</string>
     <string name="translator_hint_active_title">Говорите в любой момент</string>
     <string name="translator_hint_active_subtitle">Перевод появится здесь и прозвучит вслух</string>
 
     <!-- Bubbles -->
-    <string name="translator_bubble_you_speaking">Вы говорите…</string>
+    <string name="translator_bubble_you_speaking">Вы говорите...</string>
     <string name="translator_bubble_you">Вы</string>
     <string name="translator_bubble_translation">Перевод</string>
 
