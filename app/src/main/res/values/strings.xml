@@ -16,7 +16,7 @@ resources>
 
     <!-- Empty hint -->
     <string name="translator_hint_idle_title">Голосовой переводчик</string>
-    <string name="translator_hint_idle_subtitle">Русский &#xB7; Український &#xB7; Deutsch\nМгновенный голосовой перевод</string>
+    <string name="translator_hint_idle_subtitle">Русский &#xB7; Украинский &#xB7; Deutsch\nМгновенный голосовой перевод</string>
     <string name="translator_hint_active_title">Говорите в любой момент</string>
     <string name="translator_hint_active_subtitle">Перевод появится здесь и прозвучит вслух</string>
 
