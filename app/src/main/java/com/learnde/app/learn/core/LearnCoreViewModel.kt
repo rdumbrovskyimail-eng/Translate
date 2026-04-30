@@ -1090,13 +1090,15 @@ class LearnCoreViewModel @Inject constructor(
                             awaitingInitialGreeting = false
                             greetingFallbackJob?.cancel()
                         }
-                        // v3.7: если text пришёл, а audio ещё нет — стартуем
-                        // text-without-audio watchdog
                         if (lastAiAudioChunkAtMs == 0L
                             || (System.currentTimeMillis() - lastAiAudioChunkAtMs) > 500) {
                             startTextWithoutAudioWatchdog()
                         }
-                        transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
+                        // v3.9: для translator пузыри строит TranslatorTextTranscriber.
+                        // Output аудио-модели в UI не пускаем — был бы дубль перевода.
+                        if (activeSession?.id != "translator") {
+                            transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
+                        }
                     }
 
                     is GeminiEvent.ModelText -> {
@@ -1108,7 +1110,10 @@ class LearnCoreViewModel @Inject constructor(
                             || (System.currentTimeMillis() - lastAiAudioChunkAtMs) > 500) {
                             startTextWithoutAudioWatchdog()
                         }
-                        transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "ModelText"))
+                        // v3.9: см. комментарий в OutputTranscript ветке
+                        if (activeSession?.id != "translator") {
+                            transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "ModelText"))
+                        }
                     }
 
                     is GeminiEvent.ToolCall -> {
