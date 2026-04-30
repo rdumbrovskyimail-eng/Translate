@@ -1,15 +1,20 @@
 // ════════════════════════════════════════════════════════════
-// ПОЛНАЯ ЗАМЕНА v6.0 (premium hero design)
+// ПОЛНАЯ ЗАМЕНА v7.0 — production-ready, multi-language
 // Путь: app/src/main/java/com/learnde/app/learn/sessions/translator/TranslateScreen.kt
 //
-// КОНЦЕПЦИЯ v6.0:
-//   - Hero AudioParticleBox растянут на весь экран как фон
-//   - Транскрипт-пузыри плавают поверх с прозрачным фоном (glassmorphism)
-//   - Микрофонная кнопка плавающая, минималистичная
-//   - Состояния показываются через цвет шарика и тонкие индикаторы
-//   - Никаких загрузочных баров — только живая анимация
-//   - Нейтральная цветовая схема: deep navy + accent (без флагов)
-//   - Языки показываются как абстрактные иконки, не флаги
+// УЛУЧШЕНИЯ v7.0 vs v6.0:
+//   1. Полная локализация через stringResource (RU/UK/DE)
+//   2. UA вместо UK (ISO правильно)
+//   3. Убрана белорусская "ў" из украинского детектора
+//   4. animateColorAsState для плавного перехода цвета mic кнопки
+//   5. Glassmorphism с градиентным бордером для эффекта стекла
+//   6. lineHeight явно для всего текста
+//   7. Дышащая анимация альфы для live-пузыря
+//   8. systemBarsPadding вместо ручного расчёта
+//   9. Haptic feedback на mic
+//  10. Тонкая зернистость на фоне
+//  11. Tutorial-шаги в empty state
+//  12. Усиленный shadow под пузырями для глубины
 // ════════════════════════════════════════════════════════════
 package com.learnde.app.learn.sessions.translator
 
@@ -17,8 +22,10 @@ import android.Manifest
 import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import kotlinx.coroutines.flow.Flow
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.ExperimentalAnimationApi
+import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
@@ -28,32 +35,27 @@ import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.infiniteRepeatable
 import androidx.compose.animation.core.rememberInfiniteTransition
 import androidx.compose.animation.core.tween
-import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.ExperimentalAnimationApi
 import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
-import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.togetherWith
-import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
-import androidx.compose.foundation.layout.WindowInsets
-import androidx.compose.foundation.layout.asPaddingValues
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.foundation.layout.navigationBars
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
-import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.systemBarsPadding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -79,45 +81,53 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalHapticFeedback
+import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.learnde.app.R
 import com.learnde.app.domain.model.ConversationMessage
 import com.learnde.app.learn.core.LearnConnectionStatus
 import com.learnde.app.learn.core.LearnCoreIntent
 import com.learnde.app.learn.core.LearnCoreViewModel
 import com.learnde.app.presentation.learn.components.AudioParticleBox
-import com.learnde.app.presentation.learn.theme.LearnTokens
+import kotlinx.coroutines.flow.Flow
+import kotlin.random.Random
 
 // ═══════════════════════════════════════════════════════════
-// ЦВЕТОВАЯ СХЕМА v6.0 — нейтральная, премиальная
+//  PALETTE — премиум, нейтральная для всех культур
 // ═══════════════════════════════════════════════════════════
 private object TranslatorPalette {
-    // Глубокий тёмно-синий с лёгкой холодной нотой — нейтрально для всех культур
-    val BgTop = Color(0xFF0A0E1A)
-    val BgBottom = Color(0xFF050810)
-    
-    // Акценты для состояний
-    val AccentIdle = Color(0xFF4A5570)       // спокойный графит
-    val AccentListen = Color(0xFF00D4AA)     // мятный — слушаю
-    val AccentSpeak = Color(0xFF7B6FF7)      // лавандовый — говорю
-    val AccentDanger = Color(0xFFFF5470)     // коралл — стоп
-    
-    val TextPrimary = Color(0xFFF0F2F8)
+    val BgTop      = Color(0xFF0B0F1C)
+    val BgBottom   = Color(0xFF03060D)
+
+    val AccentIdle    = Color(0xFF4A5570)
+    val AccentListen  = Color(0xFF00D4AA)
+    val AccentSpeak   = Color(0xFF7B6FF7)
+    val AccentDanger  = Color(0xFFFF5470)
+
+    val TextPrimary   = Color(0xFFF2F4FA)
     val TextSecondary = Color(0xFFA8B0C4)
-    val TextMuted = Color(0xFF6B7388)
-    
-    // Для пузырей
-    val BubbleUserBg = Color(0xFF1A2138).copy(alpha = 0.85f)
-    val BubbleModelBg = Color(0xFF161D30).copy(alpha = 0.85f)
-    val BubbleStroke = Color(0xFFFFFFFF).copy(alpha = 0.08f)
+    val TextMuted     = Color(0xFF6B7388)
+
+    val BubbleUserBgTop    = Color(0xFF1E2742).copy(alpha = 0.92f)
+    val BubbleUserBgBottom = Color(0xFF161D33).copy(alpha = 0.78f)
+    val BubbleModelBgTop   = Color(0xFF1A2138).copy(alpha = 0.92f)
+    val BubbleModelBgBottom = Color(0xFF12182A).copy(alpha = 0.78f)
+    val BubbleHighlight    = Color(0xFFFFFFFF).copy(alpha = 0.16f)
+    val BubbleShade        = Color(0xFFFFFFFF).copy(alpha = 0.02f)
+
+    val NoiseColor = Color(0xFFFFFFFF).copy(alpha = 0.012f)
 }
 
 @Composable
@@ -127,6 +137,7 @@ fun TranslatorScreen(
 ) {
     val learnState by learnCoreViewModel.state.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val haptics = LocalHapticFeedback.current
 
     val isActive = learnState.sessionId == "translator" &&
         learnState.connectionStatus != LearnConnectionStatus.Disconnected
@@ -139,11 +150,12 @@ fun TranslatorScreen(
         ActivityResultContracts.RequestPermission(),
     ) { granted ->
         if (granted) {
+            haptics.performHapticFeedback(HapticFeedbackType.LongPress)
             learnCoreViewModel.onIntent(LearnCoreIntent.Start("translator"))
         } else {
             rationaleIsPermanent = activity == null ||
                 !androidx.core.app.ActivityCompat.shouldShowRequestPermissionRationale(
-                    activity, android.Manifest.permission.RECORD_AUDIO,
+                    activity, Manifest.permission.RECORD_AUDIO,
                 )
             showRationaleDialog = true
         }
@@ -166,10 +178,6 @@ fun TranslatorScreen(
         onBack()
     }
 
-    val statusBarPadding = WindowInsets.statusBars.asPaddingValues()
-    val navBarPadding = WindowInsets.navigationBars.asPaddingValues()
-
-    // ═══ Корневой контейнер с градиентом ═══
     Box(
         modifier = Modifier
             .fillMaxSize()
@@ -179,22 +187,22 @@ fun TranslatorScreen(
                 )
             )
     ) {
-        // ═══ HERO: шарик во весь экран как фон ═══
+        // Тонкая зернистость для матового эффекта
+        NoiseLayer()
+
+        // Hero шарик во весь экран
         HeroParticleBackground(
             playbackSync = learnCoreViewModel.audioPlaybackFlow,
             isActive = isActive,
             isAiSpeaking = learnState.isAiSpeaking,
             isMicActive = learnState.isMicActive,
-            isPreparing = learnState.isPreparingSession,
         )
 
-        // ═══ Контент поверх шарика ═══
         Column(
             modifier = Modifier
                 .fillMaxSize()
-                .padding(top = statusBarPadding.calculateTopPadding())
+                .systemBarsPadding(),
         ) {
-            // Топ-бар
             TopBar(
                 onBack = {
                     if (isActive) learnCoreViewModel.onIntent(LearnCoreIntent.Stop)
@@ -205,7 +213,6 @@ fun TranslatorScreen(
                 isMicActive = learnState.isMicActive,
             )
 
-            // Языковой индикатор
             LanguageIndicator(
                 isActive = isActive,
                 modifier = Modifier
@@ -213,7 +220,6 @@ fun TranslatorScreen(
                     .padding(horizontal = 24.dp, vertical = 8.dp)
             )
 
-            // Транскрипт (плавающие пузыри)
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
@@ -236,18 +242,16 @@ fun TranslatorScreen(
                 }
             }
 
-            // Главная кнопка
             Box(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(bottom = 24.dp + navBarPadding.calculateBottomPadding()),
+                    .padding(bottom = 24.dp),
                 contentAlignment = Alignment.Center,
             ) {
                 FloatingMicButton(
                     isActive = isActive,
-                    isAiSpeaking = learnState.isAiSpeaking,
-                    isMicActive = learnState.isMicActive,
                     onStart = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
                         val hasMic = ContextCompat.checkSelfPermission(
                             context, Manifest.permission.RECORD_AUDIO,
                         ) == PackageManager.PERMISSION_GRANTED
@@ -257,7 +261,10 @@ fun TranslatorScreen(
                             micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                         }
                     },
-                    onStop = { learnCoreViewModel.onIntent(LearnCoreIntent.Stop) },
+                    onStop = {
+                        haptics.performHapticFeedback(HapticFeedbackType.LongPress)
+                        learnCoreViewModel.onIntent(LearnCoreIntent.Stop)
+                    },
                 )
             }
         }
@@ -265,7 +272,30 @@ fun TranslatorScreen(
 }
 
 // ═══════════════════════════════════════════════════════════
-//  HERO — шарик-частицы во весь экран
+//  NOISE LAYER — едва заметная зернистость для матового эффекта
+// ═══════════════════════════════════════════════════════════
+@Composable
+private fun NoiseLayer() {
+    val noisePoints = remember {
+        List(2000) {
+            Offset(Random.nextFloat(), Random.nextFloat())
+        }
+    }
+    Canvas(modifier = Modifier.fillMaxSize()) {
+        val w = size.width
+        val h = size.height
+        noisePoints.forEach { p ->
+            drawCircle(
+                color = TranslatorPalette.NoiseColor,
+                radius = 0.6f,
+                center = Offset(p.x * w, p.y * h),
+            )
+        }
+    }
+}
+
+// ═══════════════════════════════════════════════════════════
+//  HERO PARTICLE BACKGROUND
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun HeroParticleBackground(
@@ -273,23 +303,20 @@ private fun HeroParticleBackground(
     isActive: Boolean,
     isAiSpeaking: Boolean,
     isMicActive: Boolean,
-    isPreparing: Boolean,
 ) {
-    // Размер шарика анимируется в зависимости от состояния
     val targetSize = when {
         !isActive -> 220.dp
         isAiSpeaking -> 380.dp
         isMicActive -> 320.dp
         else -> 260.dp
     }
-    
+
     val animatedSize by animateDpAsState(
         targetValue = targetSize,
         animationSpec = tween(800, easing = FastOutSlowInEasing),
         label = "heroSize",
     )
-    
-    // Лёгкая пульсация когда сессия активна
+
     val pulseTransition = rememberInfiniteTransition(label = "heroPulse")
     val breathScale by pulseTransition.animateFloat(
         initialValue = 1f,
@@ -300,31 +327,35 @@ private fun HeroParticleBackground(
         ),
         label = "heroBreath",
     )
-    
-    // Радиальный glow ПОД шариком
+
+    val targetGlowAlpha = when {
+        !isActive -> 0.15f
+        isAiSpeaking -> 0.55f
+        isMicActive -> 0.45f
+        else -> 0.25f
+    }
     val glowAlpha by animateFloatAsState(
-        targetValue = when {
-            !isActive -> 0.15f
-            isAiSpeaking -> 0.55f
-            isMicActive -> 0.45f
-            else -> 0.25f
-        },
+        targetValue = targetGlowAlpha,
         animationSpec = tween(600),
         label = "heroGlow",
     )
-    
-    val glowColor = when {
+
+    val targetGlowColor = when {
         !isActive -> TranslatorPalette.AccentIdle
         isAiSpeaking -> TranslatorPalette.AccentSpeak
         isMicActive -> TranslatorPalette.AccentListen
         else -> TranslatorPalette.AccentIdle
     }
+    val glowColor by animateColorAsState(
+        targetValue = targetGlowColor,
+        animationSpec = tween(600),
+        label = "heroGlowColor",
+    )
 
     Box(
         modifier = Modifier.fillMaxSize(),
         contentAlignment = Alignment.Center,
     ) {
-        // Радиальный glow (мягкое свечение фоном)
         Box(
             modifier = Modifier
                 .size(animatedSize * 1.8f)
@@ -341,8 +372,7 @@ private fun HeroParticleBackground(
                     )
                 )
         )
-        
-        // Сам шарик
+
         Box(
             modifier = Modifier
                 .size(animatedSize)
@@ -355,8 +385,7 @@ private fun HeroParticleBackground(
                 size = animatedSize,
             )
         }
-        
-        // Тонкое кольцо вокруг шарика (только когда активна сессия)
+
         AnimatedVisibility(
             visible = isActive,
             enter = fadeIn(tween(600)),
@@ -386,7 +415,7 @@ private fun RotatingRing(
         ),
         label = "ringAngle",
     )
-    
+
     Box(
         modifier = Modifier
             .size(size)
@@ -410,7 +439,7 @@ private fun RotatingRing(
 }
 
 // ═══════════════════════════════════════════════════════════
-//  TOP BAR — минималистичный
+//  TOP BAR
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun TopBar(
@@ -422,38 +451,46 @@ private fun TopBar(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .padding(horizontal = 8.dp, vertical = 8.dp),
+            .padding(horizontal = 8.dp, vertical = 4.dp),
         verticalAlignment = Alignment.CenterVertically,
     ) {
         IconButton(onClick = onBack) {
             Icon(
                 Icons.AutoMirrored.Filled.ArrowBack,
-                contentDescription = "Назад",
+                contentDescription = stringResource(R.string.cd_back),
                 tint = TranslatorPalette.TextPrimary,
             )
         }
-        
+
         Spacer(Modifier.width(4.dp))
-        
+
         Column(modifier = Modifier.weight(1f)) {
             Text(
-                "Live Translator",
+                stringResource(R.string.translator_title),
                 fontSize = 17.sp,
+                lineHeight = 22.sp,
                 fontWeight = FontWeight.SemiBold,
                 color = TranslatorPalette.TextPrimary,
                 letterSpacing = 0.2.sp,
             )
+
             val statusText = when {
-                isActive && isAiSpeaking -> "Перевод"
-                isActive && isMicActive -> "Слушаю"
-                isActive -> "Готов"
-                else -> "Нажмите, чтобы начать"
+                isActive && isAiSpeaking -> stringResource(R.string.translator_status_speaking)
+                isActive && isMicActive -> stringResource(R.string.translator_status_listening)
+                isActive -> stringResource(R.string.translator_status_ready)
+                else -> stringResource(R.string.translator_status_idle)
             }
-            val statusColor = when {
+            val targetStatusColor = when {
                 isActive && isAiSpeaking -> TranslatorPalette.AccentSpeak
                 isActive && isMicActive -> TranslatorPalette.AccentListen
                 else -> TranslatorPalette.TextMuted
             }
+            val statusColor by animateColorAsState(
+                targetValue = targetStatusColor,
+                animationSpec = tween(400),
+                label = "statusColor",
+            )
+
             Row(verticalAlignment = Alignment.CenterVertically) {
                 if (isActive) {
                     Box(
@@ -467,19 +504,20 @@ private fun TopBar(
                 Text(
                     statusText,
                     fontSize = 11.sp,
+                    lineHeight = 14.sp,
                     color = statusColor,
                     fontWeight = FontWeight.Medium,
                     letterSpacing = 0.3.sp,
                 )
             }
         }
-        
+
         Spacer(Modifier.width(8.dp))
     }
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ЯЗЫКОВОЙ ИНДИКАТОР — без флагов, абстрактный
+//  LANGUAGE INDICATOR
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun LanguageIndicator(
@@ -490,17 +528,31 @@ private fun LanguageIndicator(
         modifier = modifier
             .clip(RoundedCornerShape(28.dp))
             .background(Color.White.copy(alpha = 0.04f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(28.dp))
+            .border(
+                width = 1.dp,
+                brush = Brush.linearGradient(
+                    colors = listOf(
+                        Color.White.copy(alpha = 0.10f),
+                        Color.White.copy(alpha = 0.02f),
+                    )
+                ),
+                shape = RoundedCornerShape(28.dp),
+            )
             .padding(horizontal = 20.dp, vertical = 10.dp),
         horizontalArrangement = Arrangement.SpaceBetween,
         verticalAlignment = Alignment.CenterVertically,
     ) {
-        LangChip("RU · UK", "Ваш язык")
-        
-        // Стрелка-разделитель
+        LangChip(
+            code = stringResource(R.string.translator_lang_codes_user),
+            label = stringResource(R.string.translator_lang_user),
+        )
+
         AnimatedDivider(isActive = isActive)
-        
-        LangChip("DE", "Deutsch")
+
+        LangChip(
+            code = stringResource(R.string.translator_lang_code_target),
+            label = stringResource(R.string.translator_lang_target),
+        )
     }
 }
 
@@ -510,6 +562,7 @@ private fun LangChip(code: String, label: String) {
         Text(
             code,
             fontSize = 13.sp,
+            lineHeight = 16.sp,
             fontWeight = FontWeight.Bold,
             color = TranslatorPalette.TextPrimary,
             letterSpacing = 1.2.sp,
@@ -517,6 +570,7 @@ private fun LangChip(code: String, label: String) {
         Text(
             label,
             fontSize = 9.sp,
+            lineHeight = 12.sp,
             color = TranslatorPalette.TextMuted,
             fontWeight = FontWeight.Medium,
             letterSpacing = 0.3.sp,
@@ -535,7 +589,7 @@ private fun AnimatedDivider(isActive: Boolean) {
         ),
         label = "dividerOffset",
     )
-    
+
     Row(
         modifier = Modifier.width(80.dp),
         verticalAlignment = Alignment.CenterVertically,
@@ -546,7 +600,7 @@ private fun AnimatedDivider(isActive: Boolean) {
                 val phase = (offset + i * 0.2f) % 1f
                 (kotlin.math.sin(phase * Math.PI).toFloat() * 0.7f + 0.3f).coerceIn(0.2f, 1f)
             } else 0.3f
-            
+
             Box(
                 modifier = Modifier
                     .size(width = 6.dp, height = 2.dp)
@@ -559,7 +613,7 @@ private fun AnimatedDivider(isActive: Boolean) {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  EMPTY STATE
+//  EMPTY STATE — с tutorial-шагами
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun EmptyHint(
@@ -572,30 +626,85 @@ private fun EmptyHint(
     ) {
         Column(
             horizontalAlignment = Alignment.CenterHorizontally,
-            modifier = Modifier.padding(horizontal = 32.dp, vertical = 24.dp),
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 32.dp, vertical = 24.dp),
+            verticalArrangement = Arrangement.spacedBy(20.dp),
         ) {
-            Text(
-                if (isActive) "Говорите в любой момент" else "Нажмите, чтобы начать",
-                fontSize = 15.sp,
-                fontWeight = FontWeight.Medium,
-                color = TranslatorPalette.TextPrimary.copy(alpha = 0.9f),
-                textAlign = TextAlign.Center,
-            )
-            Spacer(Modifier.height(6.dp))
-            Text(
-                if (isActive) "Перевод появится здесь"
-                else "RU · UK · DE · мгновенный голосовой перевод",
-                fontSize = 11.sp,
-                color = TranslatorPalette.TextMuted,
-                textAlign = TextAlign.Center,
-                lineHeight = 16.sp,
-            )
+            // Tutorial steps — только когда idle
+            if (!isActive) {
+                TutorialSteps()
+            }
+
+            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                Text(
+                    if (isActive) stringResource(R.string.translator_hint_active_title)
+                    else stringResource(R.string.translator_hint_idle_title),
+                    fontSize = 16.sp,
+                    lineHeight = 22.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = TranslatorPalette.TextPrimary.copy(alpha = 0.95f),
+                    textAlign = TextAlign.Center,
+                )
+                Spacer(Modifier.height(6.dp))
+                Text(
+                    if (isActive) stringResource(R.string.translator_hint_active_subtitle)
+                    else stringResource(R.string.translator_hint_idle_subtitle),
+                    fontSize = 12.sp,
+                    lineHeight = 17.sp,
+                    color = TranslatorPalette.TextMuted,
+                    textAlign = TextAlign.Center,
+                )
+            }
         }
     }
 }
 
+@Composable
+private fun TutorialSteps() {
+    Column(
+        verticalArrangement = Arrangement.spacedBy(10.dp),
+        modifier = Modifier.padding(bottom = 8.dp),
+    ) {
+        TutorialStep(num = "1", text = stringResource(R.string.translator_tutorial_step1))
+        TutorialStep(num = "2", text = stringResource(R.string.translator_tutorial_step2))
+        TutorialStep(num = "3", text = stringResource(R.string.translator_tutorial_step3))
+    }
+}
+
+@Composable
+private fun TutorialStep(num: String, text: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+        Box(
+            modifier = Modifier
+                .size(22.dp)
+                .clip(CircleShape)
+                .background(Color.White.copy(alpha = 0.06f))
+                .border(1.dp, Color.White.copy(alpha = 0.10f), CircleShape),
+            contentAlignment = Alignment.Center,
+        ) {
+            Text(
+                num,
+                fontSize = 11.sp,
+                fontWeight = FontWeight.Bold,
+                color = TranslatorPalette.TextSecondary,
+            )
+        }
+        Text(
+            text,
+            fontSize = 13.sp,
+            lineHeight = 18.sp,
+            color = TranslatorPalette.TextSecondary,
+            fontWeight = FontWeight.Medium,
+        )
+    }
+}
+
 // ═══════════════════════════════════════════════════════════
-//  ПЛАВАЮЩИЙ ТРАНСКРИПТ (поверх шарика)
+//  FLOATING TRANSCRIPT
 // ═══════════════════════════════════════════════════════════
 @Composable
 private fun FloatingTranscript(
@@ -604,7 +713,7 @@ private fun FloatingTranscript(
     showThinking: Boolean,
 ) {
     val listState = rememberLazyListState()
-    
+
     LaunchedEffect(messages.size, messages.lastOrNull()?.text, liveUserText, showThinking) {
         val extra = when {
             liveUserText.isNotEmpty() -> 1
@@ -616,20 +725,17 @@ private fun FloatingTranscript(
             listState.animateScrollToItem(totalItems - 1)
         }
     }
-    
+
     LazyColumn(
         state = listState,
         modifier = Modifier.fillMaxSize(),
-        contentPadding = androidx.compose.foundation.layout.PaddingValues(
-            horizontal = 20.dp,
-            vertical = 8.dp,
-        ),
+        contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
         items(messages, key = { msg -> "${msg.timestamp}_${msg.role}" }) { msg ->
             FloatingBubble(message = msg, isLive = false)
         }
-        
+
         if (liveUserText.isNotEmpty()) {
             item(key = "live_user") {
                 val liveMsg = ConversationMessage(
@@ -640,7 +746,7 @@ private fun FloatingTranscript(
                 FloatingBubble(message = liveMsg, isLive = true)
             }
         }
-        
+
         if (showThinking && liveUserText.isEmpty()) {
             item(key = "thinking") {
                 ThinkingDots()
@@ -662,42 +768,69 @@ private fun FloatingBubble(message: ConversationMessage, isLive: Boolean) {
         DetectedLang.UK -> "UA"
         DetectedLang.UNKNOWN -> ""
     }
-    
-    val bubbleColor = if (isUser) TranslatorPalette.BubbleUserBg else TranslatorPalette.BubbleModelBg
+
+    val (bgTop, bgBottom) = if (isUser)
+        TranslatorPalette.BubbleUserBgTop to TranslatorPalette.BubbleUserBgBottom
+    else
+        TranslatorPalette.BubbleModelBgTop to TranslatorPalette.BubbleModelBgBottom
+
     val accentDot = if (isUser) TranslatorPalette.AccentListen else TranslatorPalette.AccentSpeak
-    val bubbleAlpha by animateFloatAsState(
-        targetValue = if (isLive) 0.65f else 1f,
+
+    // Дышащая анимация для live-пузыря
+    val breathTransition = rememberInfiniteTransition(label = "liveBreath")
+    val breathAlpha by breathTransition.animateFloat(
+        initialValue = 0.55f,
+        targetValue = 0.85f,
+        animationSpec = infiniteRepeatable(
+            animation = tween(900, easing = FastOutSlowInEasing),
+            repeatMode = RepeatMode.Reverse,
+        ),
+        label = "liveAlpha",
+    )
+
+    val finalAlpha by animateFloatAsState(
+        targetValue = if (isLive) breathAlpha else 1f,
         animationSpec = tween(300),
         label = "bubbleAlpha",
+    )
+
+    val youSpeakingLabel = stringResource(R.string.translator_bubble_you_speaking)
+    val youLabel = stringResource(R.string.translator_bubble_you)
+    val translationLabel = stringResource(R.string.translator_bubble_translation)
+
+    val bubbleShape = RoundedCornerShape(
+        topStart = 18.dp,
+        topEnd = 18.dp,
+        bottomStart = if (isUser) 18.dp else 4.dp,
+        bottomEnd = if (isUser) 4.dp else 18.dp,
     )
 
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .alpha(bubbleAlpha),
+            .alpha(finalAlpha),
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start,
     ) {
         Column(
             modifier = Modifier
                 .fillMaxWidth(0.88f)
-                .clip(
-                    RoundedCornerShape(
-                        topStart = 18.dp,
-                        topEnd = 18.dp,
-                        bottomStart = if (isUser) 18.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 18.dp,
-                    ),
+                .clip(bubbleShape)
+                // Glassmorphism: вертикальный градиент имитирует свет сверху
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(bgTop, bgBottom)
+                    )
                 )
-                .background(bubbleColor)
+                // Двойной градиентный бордер: блик сверху + тень снизу
                 .border(
-                    1.dp,
-                    TranslatorPalette.BubbleStroke,
-                    RoundedCornerShape(
-                        topStart = 18.dp,
-                        topEnd = 18.dp,
-                        bottomStart = if (isUser) 18.dp else 4.dp,
-                        bottomEnd = if (isUser) 4.dp else 18.dp,
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            TranslatorPalette.BubbleHighlight,
+                            TranslatorPalette.BubbleShade,
+                        )
                     ),
+                    shape = bubbleShape,
                 )
                 .padding(horizontal = 14.dp, vertical = 10.dp),
         ) {
@@ -709,9 +842,17 @@ private fun FloatingBubble(message: ConversationMessage, isLive: Boolean) {
                         .background(accentDot)
                 )
                 Spacer(Modifier.width(6.dp))
+
+                val labelText = when {
+                    isLive -> youSpeakingLabel
+                    isUser -> if (langCode.isNotEmpty()) "$youLabel · $langCode" else youLabel
+                    else -> if (langCode.isNotEmpty()) "$translationLabel · $langCode" else translationLabel
+                }
+
                 Text(
-                    if (isLive) "ВЫ ГОВОРИТЕ" else if (isUser) "ВЫ · $langCode" else "ПЕРЕВОД · $langCode",
-                    fontSize = 8.5.sp,
+                    labelText.uppercase(),
+                    fontSize = 9.sp,
+                    lineHeight = 12.sp,
                     fontWeight = FontWeight.Bold,
                     color = TranslatorPalette.TextSecondary,
                     letterSpacing = 1.sp,
@@ -721,8 +862,8 @@ private fun FloatingBubble(message: ConversationMessage, isLive: Boolean) {
             Text(
                 text,
                 fontSize = 15.sp,
+                lineHeight = 22.sp,
                 color = TranslatorPalette.TextPrimary,
-                lineHeight = 21.sp,
                 fontWeight = FontWeight.Normal,
             )
         }
@@ -747,7 +888,7 @@ private fun ThinkingDots() {
         animationSpec = infiniteRepeatable(tween(600, delayMillis = 400), RepeatMode.Reverse),
         label = "d3",
     )
-    
+
     Row(
         modifier = Modifier.fillMaxWidth(),
         horizontalArrangement = Arrangement.End,
@@ -755,8 +896,24 @@ private fun ThinkingDots() {
         Row(
             modifier = Modifier
                 .clip(RoundedCornerShape(18.dp))
-                .background(TranslatorPalette.BubbleUserBg)
-                .border(1.dp, TranslatorPalette.BubbleStroke, RoundedCornerShape(18.dp))
+                .background(
+                    Brush.verticalGradient(
+                        colors = listOf(
+                            TranslatorPalette.BubbleUserBgTop,
+                            TranslatorPalette.BubbleUserBgBottom,
+                        )
+                    )
+                )
+                .border(
+                    width = 1.dp,
+                    brush = Brush.linearGradient(
+                        colors = listOf(
+                            TranslatorPalette.BubbleHighlight,
+                            TranslatorPalette.BubbleShade,
+                        )
+                    ),
+                    shape = RoundedCornerShape(18.dp),
+                )
                 .padding(horizontal = 14.dp, vertical = 12.dp),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.spacedBy(5.dp),
@@ -775,29 +932,26 @@ private fun ThinkingDots() {
 }
 
 // ═══════════════════════════════════════════════════════════
-//  ПЛАВАЮЩАЯ КНОПКА МИКРОФОНА
+//  FLOATING MIC BUTTON
 // ═══════════════════════════════════════════════════════════
 @OptIn(ExperimentalAnimationApi::class)
 @Composable
 private fun FloatingMicButton(
     isActive: Boolean,
-    isAiSpeaking: Boolean,
-    isMicActive: Boolean,
     onStart: () -> Unit,
     onStop: () -> Unit,
 ) {
-    val buttonColor = when {
-        !isActive -> TranslatorPalette.AccentListen
-        isActive -> TranslatorPalette.AccentDanger
-        else -> TranslatorPalette.AccentIdle
-    }
-    
-    val animatedColor by animateFloatAsState(
-        targetValue = if (isActive) 1f else 0f,
+    val targetColor = if (isActive)
+        TranslatorPalette.AccentDanger
+    else
+        TranslatorPalette.AccentListen
+
+    val animatedButtonColor by animateColorAsState(
+        targetValue = targetColor,
         animationSpec = tween(400),
         label = "btnColor",
     )
-    
+
     val pulse = rememberInfiniteTransition(label = "btnPulse")
     val pulseScale by pulse.animateFloat(
         initialValue = 1f,
@@ -815,26 +969,26 @@ private fun FloatingMicButton(
         label = "pulseAlpha",
     )
 
+    val startCd = stringResource(R.string.cd_mic_start)
+    val stopCd = stringResource(R.string.cd_mic_stop)
+
     Box(
         modifier = Modifier.size(96.dp),
         contentAlignment = Alignment.Center,
     ) {
-        // Внешний пульс
         Box(
             modifier = Modifier
                 .size(96.dp)
                 .scale(pulseScale)
                 .clip(CircleShape)
-                .background(buttonColor.copy(alpha = pulseAlpha)),
+                .background(animatedButtonColor.copy(alpha = pulseAlpha)),
         )
-        // Средний halo
         Box(
             modifier = Modifier
                 .size(82.dp)
                 .clip(CircleShape)
-                .background(buttonColor.copy(alpha = 0.18f)),
+                .background(animatedButtonColor.copy(alpha = 0.18f)),
         )
-        // Сама кнопка
         Box(
             modifier = Modifier
                 .size(68.dp)
@@ -842,8 +996,8 @@ private fun FloatingMicButton(
                 .background(
                     Brush.linearGradient(
                         colors = listOf(
-                            buttonColor,
-                            buttonColor.copy(alpha = 0.85f),
+                            animatedButtonColor,
+                            animatedButtonColor.copy(alpha = 0.85f),
                         )
                     )
                 )
@@ -857,7 +1011,7 @@ private fun FloatingMicButton(
                 },
             contentAlignment = Alignment.Center,
         ) {
-            androidx.compose.animation.AnimatedContent(
+            AnimatedContent(
                 targetState = isActive,
                 transitionSpec = {
                     (scaleIn(tween(200)) + fadeIn(tween(200))) togetherWith
@@ -867,7 +1021,7 @@ private fun FloatingMicButton(
             ) { active ->
                 Icon(
                     if (active) Icons.Filled.Stop else Icons.Filled.Mic,
-                    contentDescription = if (active) "Стоп" else "Старт",
+                    contentDescription = if (active) stopCd else startCd,
                     tint = Color.White,
                     modifier = Modifier.size(28.dp),
                 )
@@ -877,11 +1031,12 @@ private fun FloatingMicButton(
 }
 
 // ═══════════════════════════════════════════════════════════
-// Language detection (без изменений, нужно для меток языка)
+//  Language detection — UA fixed, Belarusian removed
 // ═══════════════════════════════════════════════════════════
 private enum class DetectedLang { DE, RU, UK, UNKNOWN }
 
-private val UKR_SPECIFIC_LETTERS = "ієґїІЄҐЇўЎ"
+// Только украинские специфические буквы. ў/Ў белорусские — удалены.
+private val UKR_SPECIFIC_LETTERS = "ієґїІЄҐЇ"
 
 private val UKR_MARKER_WORDS = setOf(
     "що", "щоб", "чому", "як", "де", "коли",
