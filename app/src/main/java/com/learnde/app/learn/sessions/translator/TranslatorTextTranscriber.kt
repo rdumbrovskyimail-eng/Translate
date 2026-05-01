@@ -58,38 +58,24 @@ class TranslatorTextTranscriber @Inject constructor(
         private const val MAX_PCM_BUFFER_BYTES = 320_000
     }
 
-    private val systemInstruction = """
-You are a real-time text translator. For every user utterance you produce TWO things: the original transcript AND the translation, following STRICT direction rules identical to the audio translator.
-
-TRANSLATION DIRECTIONS — STRICT, NO EXCEPTIONS:
-- Russian input   → German output
-- Ukrainian input → German output
-- German input    → Russian output (never Ukrainian, even after Ukrainian turns)
-- Any other language → output nothing.
-
-OUTPUT FORMAT — exactly two lines, no exceptions:
+    private val systemInstruction: String = buildString {
+        append(TranslatorSession.TRANSLATION_CORE)
+        append("\n\n")
+        append("""OUTPUT FORMAT (TEXT) — exactly two lines, no exceptions:
 ORIGINAL: <exact transcript of what the user said, in the original language and script>
 TRANSLATION: <the translation, following the direction rules above>
-
-STYLE OF TRANSLATION (same rules as audio translator):
-- Preserve first person: "меня зовут Иван" → "Ich heiße Ivan".
-- Formality: Вы / ви → Sie; ты / ти → du.
-- Idiomatic, not literal: "Как дела?" → "Wie geht's?"; "Alles klar" → "Понятно".
-- Match register and length of the source.
-- GERMAN OUTPUT — 100% GERMAN, ZERO ENGLISH: cool→toll, OK→in Ordnung, sorry→Entschuldigung, hi→hallo, bye→tschüss, thanks→danke, nice→schön, please→bitte.
-- RUSSIAN OUTPUT — natural Russian word order. No German calques. No English loanwords.
 
 ORIGINAL TRANSCRIPT RULES:
 - Use Cyrillic for Russian and Ukrainian. Use Latin with umlauts for German (ä, ö, ü, ß).
 - Distinguish Russian vs Ukrainian by markers: ї, і, є, ґ, "що", "як", "ти", "дякую", "привіт" → Ukrainian; otherwise Russian.
-- Write what the user actually said. Do not paraphrase. Do not fix grammar.
+- Write what the user actually said, verbatim. Do not paraphrase. Do not fix grammar.
 
-ABSOLUTE RULES:
+ABSOLUTE OUTPUT RULES:
 - Exactly 2 lines: one ORIGINAL line, one TRANSLATION line. Nothing else.
-- No explanations. No alternatives. No commentary.
-- Never use voice. Text only.
-- If the language is not Russian, Ukrainian or German, or audio is unintelligible — output nothing.
-""".trimIndent()
+- No explanations. No alternatives. No commentary. No labels other than ORIGINAL: and TRANSLATION:.
+- Text only. Never speak.
+- If the language is not Russian, Ukrainian or German, or audio is unintelligible — output nothing.""")
+    }
 
     suspend fun start(apiKey: String, model: String, logRaw: Boolean) {
         if (isActive) {
@@ -104,9 +90,9 @@ ABSOLUTE RULES:
             model = model,
             responseModality = "TEXT",
             temperature = 0.0f,
-            topP = 0.6f,
-            topK = 10,
-            maxOutputTokens = 256,
+            topP = 0.95f,
+            topK = 0,
+            maxOutputTokens = 512,
             voiceId = "Aoede",
             languageCode = "",
             latencyProfile = LatencyProfile.Off,
