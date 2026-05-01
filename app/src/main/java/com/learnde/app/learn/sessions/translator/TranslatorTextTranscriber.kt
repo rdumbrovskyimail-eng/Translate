@@ -117,7 +117,7 @@ ABSOLUTE OUTPUT RULES:
             sendThinkingConfig = false,
         )
 
-        logger.d("TranslatorTextTranscriber: starting (TEXT mode, model=$model)")
+        logger.d("TranslatorTextTranscriber: starting (AUDIO+outputTranscription mode, model=$model)")
 
         eventJob = scope.launch {
             client.events.collect { event ->
