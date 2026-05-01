@@ -258,6 +258,7 @@ private fun NoiseLayer() {
     Canvas(modifier = Modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
+        val strokePx = 2.dp.toPx()
         val scaled = ArrayList<Offset>(2000)
         for (i in noisePoints.indices) {
             val p = noisePoints[i]
@@ -267,7 +268,7 @@ private fun NoiseLayer() {
             points = scaled,
             pointMode = PointMode.Points,
             color = noiseColor,
-            strokeWidth = 2f
+            strokeWidth = strokePx
         )
     }
 }
@@ -550,13 +551,30 @@ private fun LangChip(code: String, label: String) {
 
 @Composable
 private fun AnimatedDivider(isActive: Boolean) {
+    if (!isActive) {
+        Row(
+            modifier = Modifier.width(80.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.Center,
+        ) {
+            repeat(5) { i ->
+                Box(
+                    modifier = Modifier
+                        .size(width = 6.dp, height = 2.dp)
+                        .clip(RoundedCornerShape(1.dp))
+                        .background(TranslatorPalette.TextSecondary.copy(alpha = 0.3f))
+                )
+                if (i < 4) Spacer(Modifier.width(3.dp))
+            }
+        }
+        return
+    }
+
     val transition = rememberInfiniteTransition(label = "divider")
     val offset by transition.animateFloat(
         initialValue = 0f,
         targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2000, easing = LinearEasing),
-        ),
+        animationSpec = infiniteRepeatable(animation = tween(2000, easing = LinearEasing)),
         label = "dividerOffset",
     )
 
@@ -571,10 +589,8 @@ private fun AnimatedDivider(isActive: Boolean) {
                     .size(width = 6.dp, height = 2.dp)
                     .clip(RoundedCornerShape(1.dp))
                     .graphicsLayer {
-                        alpha = if (isActive) {
-                            val phase = (offset + i * 0.2f) % 1f
-                            (kotlin.math.sin(phase * Math.PI).toFloat() * 0.7f + 0.3f).coerceIn(0.2f, 1f)
-                        } else 0.3f
+                        val phase = (offset + i * 0.2f) % 1f
+                        alpha = (kotlin.math.sin(phase * Math.PI).toFloat() * 0.7f + 0.3f).coerceIn(0.2f, 1f)
                     }
                     .background(TranslatorPalette.TextSecondary)
             )
@@ -696,17 +712,19 @@ private fun FloatingTranscript(
         contentPadding = PaddingValues(horizontal = 20.dp, vertical = 8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
     ) {
-        items(messages, key = { msg -> "${msg.timestamp}_${msg.role}_${msg.text.hashCode()}" }) { msg ->
+        items(messages, key = { msg -> "${msg.timestamp}_${msg.role}" }) { msg ->
             FloatingBubble(message = msg, isLive = false)
         }
 
         if (liveUserText.isNotEmpty()) {
             item(key = "live_user_bubble") {
-                val liveMsg = ConversationMessage(
-                    role = ConversationMessage.ROLE_USER,
-                    text = liveUserText,
-                    timestamp = System.currentTimeMillis()
-                )
+                val liveMsg = remember(liveUserText) {
+                    ConversationMessage(
+                        role = ConversationMessage.ROLE_USER,
+                        text = liveUserText,
+                        timestamp = -1L  // sentinel для live-пузыря
+                    )
+                }
                 FloatingBubble(message = liveMsg, isLive = true)
             }
         }
