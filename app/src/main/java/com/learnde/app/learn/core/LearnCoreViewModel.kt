@@ -146,7 +146,6 @@ class LearnCoreViewModel @Inject constructor(
         observeArbiter()
         observeVocabularyViolations()
         startTranscriptProcessor()
-        observeTranslatorTextTranscripts()
         viewModelScope.launch { audioEngine.initPlayback() }
     }
 
@@ -460,7 +459,7 @@ class LearnCoreViewModel @Inject constructor(
         }
 
         val (silenceMs, prefixMs, temp) = when (session.id) {
-            "translator"   -> Triple(350, 80, 0.05f)
+            "translator"   -> Triple(200, 50, 0.05f)
             "a1_situation" -> Triple(1000, 300, cachedSettings.temperature)
             "a1_review"    -> Triple(1000, 300, cachedSettings.temperature)
             else           -> Triple(1000, 300, cachedSettings.temperature)
@@ -472,7 +471,7 @@ class LearnCoreViewModel @Inject constructor(
 
         val finalLanguageCode = if (isTranslator) "" else cachedSettings.languageCode
         val finalVoiceId = if (isTranslator) "Puck" else cachedSettings.voiceId
-        val finalMaxTokens = if (isTranslator) 512 else cachedSettings.maxOutputTokens
+        val finalMaxTokens = if (isTranslator) 200 else cachedSettings.maxOutputTokens
         val finalTopP = if (isTranslator) 0.8f else cachedSettings.topP
         val finalTopK = if (isTranslator) 20 else cachedSettings.topK
 
@@ -539,7 +538,6 @@ class LearnCoreViewModel @Inject constructor(
         safeStopForegroundService()
 
         runCatching { liveClient.disconnect() }
-        runCatching { translatorTextTranscriber.stop() }
         runCatching { session?.onExit() }
 
         transcriptChannel.trySend(TranscriptOp.UserTurnComplete)
@@ -655,17 +653,8 @@ class LearnCoreViewModel @Inject constructor(
             activeSession = null
         }
 
-        if (session.id == "translator") {
-            runCatching {
-                translatorTextTranscriber.start(
-                    apiKey = activeApiKey,
-                    model = cachedSettings.model,
-                    logRaw = false,
-                )
-            }.onFailure { e ->
-                logger.w("Learn: translator text-transcriber start failed: ${e.message}")
-            }
-        }
+        // Translator работает на одном audio-клиенте с input/output audio transcription.
+        // Параллельный text-клиент отключён — он добавлял латентность из-за общего rate-pool.
 
         logger.d("◀ Learn.startInternal — awaiting SetupComplete")
     }
@@ -740,9 +729,7 @@ class LearnCoreViewModel @Inject constructor(
                         droppedMicChunks++
                     }
 
-                    if (isTranslator) {
-                        translatorTextTranscriber.sendAudio(chunk)
-                    }
+                    // Text-клиент отключён — translator работает только через audio-клиент.
                 }
             }
             micOperationMutex.withLock {
@@ -764,9 +751,7 @@ class LearnCoreViewModel @Inject constructor(
                 cachedSettings.sendAudioStreamEnd -> liveClient.sendAudioStreamEnd()
                 else -> liveClient.sendTurnComplete()
             }
-            if (activeSession?.id == "translator") {
-                runCatching { translatorTextTranscriber.sendAudioStreamEnd() }
-            }
+            // Text-клиент отключён.
             _state.update {
                 it.copy(
                     isMicActive = false,
@@ -891,9 +876,7 @@ class LearnCoreViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.InputTranscript -> {
-                        if (activeSession?.id != "translator") {
-                            transcriptChannel.trySend(TranscriptOp.UserDelta(event.text))
-                        }
+                        transcriptChannel.trySend(TranscriptOp.UserDelta(event.text))
                     }
 
                     is GeminiEvent.OutputTranscript -> {
@@ -910,9 +893,7 @@ class LearnCoreViewModel @Inject constructor(
                             hasModelOutputThisTurn = true
                             startStuckTurnWatchdog()
                         }
-                        if (activeSession?.id != "translator") {
-                            transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
-                        }
+                        transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
                     }
 
                     is GeminiEvent.ModelText -> {
@@ -929,9 +910,7 @@ class LearnCoreViewModel @Inject constructor(
                             hasModelOutputThisTurn = true
                             startStuckTurnWatchdog()
                         }
-                        if (activeSession?.id != "translator") {
-                            transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "ModelText"))
-                        }
+                        transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "ModelText"))
                     }
 
                     is GeminiEvent.ToolCall -> {
@@ -1206,7 +1185,6 @@ class LearnCoreViewModel @Inject constructor(
             runCatching { transcriptMutex.withLock { transcriptBuffer = emptyList() } }
             runCatching { audioEngine.releaseAll() }
             runCatching { transcriptChannel.close() }
-            runCatching { translatorTextTranscriber.shutdown() }
             logger.d("LearnCoreViewModel cleanup complete")
         }
     }
