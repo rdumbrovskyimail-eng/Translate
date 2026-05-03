@@ -210,10 +210,17 @@ class LearnCoreViewModel @Inject constructor(
         if (cachedSettings.outputTranscription && source == "ModelText") return
         if (!cachedSettings.outputTranscription && source == "OutputTranscript") return
 
+        // Первая дельта модели = модель начала отвечать = user-turn закончен.
+        // Финализируем user СНАЧАЛА, чтобы он попал в transcript ПЕРЕД model-bubble.
+        if (modelTurnBuffer.isEmpty() && userTurnBuffer.isNotEmpty()) {
+            finalizeUserTurn()
+        }
+
         lastModelActivityAtMs = System.currentTimeMillis()
         hasModelOutputThisTurn = true
         startStuckTurnWatchdog()
 
+        // Gemini Live шлёт incremental deltas (НЕ cumulative). Просто аппендим.
         modelTurnBuffer.append(text)
 
         upsertLiveModelBubble(modelTurnBuffer.toString())
