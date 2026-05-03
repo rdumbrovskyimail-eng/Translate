@@ -253,16 +253,15 @@ fun TranslatorScreen(
 private fun NoiseLayer() {
     val noiseColor = TranslatorPalette.NoiseColor
     val noisePoints = remember {
-        List(2000) { Offset(Random.nextFloat(), Random.nextFloat()) }
+        List(600) { Offset(Random.nextFloat(), Random.nextFloat()) }
     }
     Canvas(modifier = Modifier.fillMaxSize()) {
         val w = size.width
         val h = size.height
         val strokePx = 2.dp.toPx()
-        val scaled = ArrayList<Offset>(2000)
-        for (i in noisePoints.indices) {
+        val scaled = List(noisePoints.size) { i ->
             val p = noisePoints[i]
-            scaled.add(Offset(p.x * w, p.y * h))
+            Offset(p.x * w, p.y * h)
         }
         drawPoints(
             points = scaled,
