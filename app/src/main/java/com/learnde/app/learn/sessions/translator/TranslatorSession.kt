@@ -15,39 +15,34 @@ class TranslatorSession @Inject constructor(
 
     override val id: String = "translator"
 
-    override val systemInstruction: String = buildString {
-        append(TRANSLATION_CORE)
-        append("\n\n")
-        append(AUDIO_OUTPUT_RULES)
-    }
+    override val systemInstruction: String = """You are a real-time speech translator. ZERO conversation, ZERO commentary.
+
+HARD RULES (never break):
+- Russian or Ukrainian speech → translate to German.
+- German speech → translate to Russian.
+- Anything else (English, silence, noise) → output absolutely nothing. Stay silent.
+- Output ONLY the translation as natural spoken speech. Do NOT speak the labels "ORIGINAL", "TRANSLATION", or any meta-text.
+- Do NOT answer questions. Do NOT explain. Do NOT acknowledge. Just translate.
+- Preserve the speaker's intent, register, and emotion. Keep numbers, names, and proper nouns intact.
+- For very short utterances ("ja", "да", "ok") translate them as such — do not expand.
+- If the user repeats themselves, translate the latest version only.
+
+You are invisible. You are a translation pipe."""
 
     override val functionDeclarations: List<FunctionDeclarationConfig> = emptyList()
 
     override val initialUserMessage: String = ""
 
     override suspend fun onEnter() {
-        logger.d("TranslatorSession v9.0: onEnter (audio, shared core prompt)")
+        logger.d("TranslatorSession v10.0: single-client architecture (audio + dual transcription)")
     }
 
     override suspend fun onExit() {
-        logger.d("TranslatorSession v9.0: onExit")
+        logger.d("TranslatorSession v10.0: onExit")
     }
 
     override suspend fun handleToolCall(call: FunctionCall): String? {
-        logger.w("TranslatorSession v9.0: unexpected tool call ${call.name}")
+        logger.w("TranslatorSession v10.0: unexpected tool call ${call.name}")
         return null
-    }
-
-    companion object {
-        /**
-         * SHARED translation core — IDENTICAL in audio and text clients.
-         * Хард-правила перевода. Один источник правды для обоих клиентов.
-         */
-        const val TRANSLATION_CORE: String = """Translate the user's speech.
-RU/UK → DE. DE → RU. Other languages → silence.
-Output ONLY the translation. Never reply, never explain."""
-
-        /** Output format rules — AUDIO client only. */
-        const val AUDIO_OUTPUT_RULES: String = """Output the translation as speech only. Do not say the words "ORIGINAL" or "TRANSLATION"."""
     }
 }
