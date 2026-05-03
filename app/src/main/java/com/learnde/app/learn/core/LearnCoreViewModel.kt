@@ -804,6 +804,8 @@ class LearnCoreViewModel @Inject constructor(
 
                     is GeminiEvent.GenerationComplete -> {
                         _state.update { it.copy(isAiSpeaking = false) }
+                        cancelStuckTurnWatchdog()
+                        cancelTextWithoutAudioWatchdog()
                     }
 
                     is GeminiEvent.InputTranscript -> {
