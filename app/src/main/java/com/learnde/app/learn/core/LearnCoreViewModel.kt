@@ -137,7 +137,6 @@ class LearnCoreViewModel @Inject constructor(
     private val modelTurnBuffer = StringBuilder()
 
     @Volatile private var liveModelMessageTs: Long = 0L
-    @Volatile private var translatorLiveBubbleTs: Long = 0L
 
     init {
         observeSettings()
@@ -168,7 +167,6 @@ class LearnCoreViewModel @Inject constructor(
                 userTurnBuffer.clear()
                 modelTurnBuffer.clear()
                 liveModelMessageTs = 0L
-                translatorLiveBubbleTs = 0L
             }
         }
     }
@@ -176,18 +174,9 @@ class LearnCoreViewModel @Inject constructor(
     private suspend fun handleUserDelta(text: String) {
         if (text.isEmpty()) return
 
-        val current = userTurnBuffer.toString()
-        when {
-            current.isEmpty() -> userTurnBuffer.append(text)
-            text.startsWith(current) -> {
-                userTurnBuffer.clear()
-                userTurnBuffer.append(text)
-            }
-            current.contains(text) -> { }
-            else -> {
-                userTurnBuffer.append(" ").append(text)
-            }
-        }
+        // Gemini Live шлёт incremental deltas (НЕ cumulative).
+        // Просто аппендим, без перепроверок.
+        userTurnBuffer.append(text)
 
         _state.update { it.copy(liveUserTranscript = userTurnBuffer.toString()) }
 
@@ -249,44 +238,9 @@ class LearnCoreViewModel @Inject constructor(
         }
 
         liveModelMessageTs = 0L
-        translatorLiveBubbleTs = 0L
         hasModelOutputThisTurn = false
         cancelStuckTurnWatchdog()
         cancelTextWithoutAudioWatchdog()
-    }
-
-    private suspend fun upsertTranslatorLiveBubble(text: String) {
-        transcriptMutex.withLock {
-            if (translatorLiveBubbleTs == 0L) {
-                val newMsg = ConversationMessage(
-                    role = ConversationMessage.ROLE_MODEL,
-                    text = text,
-                    timestamp = System.currentTimeMillis()
-                )
-                translatorLiveBubbleTs = newMsg.timestamp
-                val next = (transcriptBuffer + newMsg).takeLast(MAX_TRANSCRIPT_SIZE)
-                transcriptBuffer = next
-                _state.update { it.copy(transcript = next) }
-            } else {
-                val idx = transcriptBuffer.indexOfLast { it.timestamp == translatorLiveBubbleTs }
-                if (idx >= 0) {
-                    val updated = transcriptBuffer[idx].copy(text = text)
-                    val next = transcriptBuffer.toMutableList().apply { set(idx, updated) }
-                    transcriptBuffer = next
-                    _state.update { it.copy(transcript = next) }
-                } else {
-                    val newMsg = ConversationMessage(
-                        role = ConversationMessage.ROLE_MODEL,
-                        text = text,
-                        timestamp = System.currentTimeMillis()
-                    )
-                    translatorLiveBubbleTs = newMsg.timestamp
-                    val next = (transcriptBuffer + newMsg).takeLast(MAX_TRANSCRIPT_SIZE)
-                    transcriptBuffer = next
-                    _state.update { it.copy(transcript = next) }
-                }
-            }
-        }
     }
 
     private suspend fun upsertLiveModelBubble(text: String) {
@@ -371,37 +325,6 @@ class LearnCoreViewModel @Inject constructor(
                 if (activeSession?.id == "a1_situation" || activeSession?.id == "a1_review") {
                     pendingVocabViolation = violation
                     logger.d("Learn: vocab violation buffered (${violation.violatingWords})")
-                }
-            }
-        }
-    }
-
-    private fun observeTranslatorTextTranscripts() {
-        viewModelScope.launch {
-            translatorTextTranscriber.events.collect { event ->
-                if (activeSession?.id != "translator") return@collect
-
-                when (event) {
-                    is com.learnde.app.learn.sessions.translator.TranscriberEvent.LiveUpdate -> {
-                        if (event.original.isNotEmpty()) {
-                            _state.update { it.copy(liveUserTranscript = event.original) }
-                        }
-                        if (event.translation.isNotEmpty()) {
-                            upsertTranslatorLiveBubble(event.translation)
-                        }
-                    }
-                    is com.learnde.app.learn.sessions.translator.TranscriberEvent.FinalTurn -> {
-                        _state.update { it.copy(liveUserTranscript = "") }
-                        transcriptMutex.withLock {
-                            val filtered = transcriptBuffer.filterNot { it.timestamp == translatorLiveBubbleTs }
-                            val userMsg = ConversationMessage.user(event.original)
-                            val modelMsg = ConversationMessage.model(event.translation)
-                            val next = (filtered + userMsg + modelMsg).takeLast(MAX_TRANSCRIPT_SIZE)
-                            transcriptBuffer = next
-                            _state.update { it.copy(transcript = next) }
-                        }
-                        translatorLiveBubbleTs = 0L
-                    }
                 }
             }
         }
@@ -559,7 +482,6 @@ class LearnCoreViewModel @Inject constructor(
         hasModelOutputThisTurn = false
         lastSilencePromptAtMs = 0L
         droppedMicChunks = 0
-        translatorLiveBubbleTs = 0L
         setupJob?.cancel()
         setupJob = null
 
