@@ -465,7 +465,6 @@ class LearnCoreViewModel @Inject constructor(
 
         activeSession = null
         pendingToolCalls.clear()
-        transcriptMutex.withLock { transcriptBuffer = emptyList() }
         statusBus.reset()
         vocabularyEnforcer.reset()
         contextSeeded = false
