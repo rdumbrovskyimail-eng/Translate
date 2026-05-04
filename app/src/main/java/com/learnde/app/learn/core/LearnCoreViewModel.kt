@@ -454,7 +454,7 @@ class LearnCoreViewModel @Inject constructor(
         }
 
         val (silenceMs, prefixMs, temp) = when (session.id) {
-            "translator"   -> Triple(400, 100, 0.05f)  // менее агрессивно — меньше ложных срабатываний на echo
+            "translator"   -> Triple(600, 200, 0.05f)  // 600мс паузы перед концом фразы — достаточно чтобы дочитать предложение
             "a1_situation" -> Triple(1000, 300, cachedSettings.temperature)
             "a1_review"    -> Triple(1000, 300, cachedSettings.temperature)
             else           -> Triple(1000, 300, cachedSettings.temperature)
