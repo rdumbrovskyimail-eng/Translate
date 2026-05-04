@@ -254,7 +254,11 @@ class LearnCoreViewModel @Inject constructor(
         val finalText = modelTurnBuffer.toString().trim()
         modelTurnBuffer.clear()
 
-        if (finalText.isNotEmpty()) {
+        // Для translator: если record_translation уже сработал — он удалил
+        // live-bubble и записал финальную пару, выставив liveModelMessageTs = 0L.
+        // В этом случае пропускаем upsert.
+        // Если функция НЕ пришла — fallback, оставляем upsert как есть.
+        if (finalText.isNotEmpty() && liveModelMessageTs != 0L) {
             upsertLiveModelBubble(finalText)
         }
 
