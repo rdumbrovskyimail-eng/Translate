@@ -332,6 +332,44 @@ class LearnCoreViewModel @Inject constructor(
         }
     }
 
+    private fun observeTranslatorFunctionTranscripts() {
+        viewModelScope.launch {
+            translatorSession.functionTranscripts.collect { pair ->
+                if (activeSession?.id != "translator") return@collect
+
+                logger.d("Translator FN-transcript: [${pair.sourceLang}] '${pair.original}' → '${pair.translation}'")
+
+                transcriptMutex.withLock {
+                    // 1. Удаляем live-bubble модели (он мог быть создан outputTranscription'ом как fallback)
+                    val filtered = transcriptBuffer.filterNot { it.timestamp == liveModelMessageTs }
+
+                    // 2. Добавляем точную пару USER + MODEL
+                    val now = System.currentTimeMillis()
+                    val userMsg = ConversationMessage(
+                        role = ConversationMessage.ROLE_USER,
+                        text = pair.original,
+                        timestamp = now,
+                    )
+                    val modelMsg = ConversationMessage(
+                        role = ConversationMessage.ROLE_MODEL,
+                        text = pair.translation,
+                        timestamp = now + 1,
+                    )
+                    val next = (filtered + userMsg + modelMsg).takeLast(MAX_TRANSCRIPT_SIZE)
+                    transcriptBuffer = next
+                    _state.update {
+                        it.copy(transcript = next, liveUserTranscript = "")
+                    }
+                }
+
+                // 3. Сбрасываем буферы дельт — их данные больше не нужны
+                liveModelMessageTs = 0L
+                userTurnBuffer.clear()
+                modelTurnBuffer.clear()
+            }
+        }
+    }
+
     fun onIntent(intent: LearnCoreIntent) {
         when (intent) {
             is LearnCoreIntent.Start     -> handleStart(intent.sessionId)
