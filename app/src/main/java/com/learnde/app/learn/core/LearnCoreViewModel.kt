@@ -858,6 +858,8 @@ class LearnCoreViewModel @Inject constructor(
                             lastModelActivityAtMs = System.currentTimeMillis()
                             hasModelOutputThisTurn = true
                             startStuckTurnWatchdog()
+                            // Для translator outputTranscription — это FALLBACK.
+                            // Если придёт record_translation — observeTranslatorFunctionTranscripts его перезапишет.
                         }
                         transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
                     }
