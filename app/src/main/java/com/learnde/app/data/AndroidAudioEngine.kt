@@ -191,30 +191,62 @@ class AndroidAudioEngine(
             val byteBuffer = ByteBuffer.allocate(minBuf * 2).order(ByteOrder.LITTLE_ENDIAN)
             val rawBytes = byteBuffer.array()
 
+            // ═══ Программный AGC ═══
+            // Нормализует пик до целевого уровня. Тихие фразы усиливаются,
+            // громкие — нет. Soft-clip защита от перегрузки.
+            var rollingPeak = 8000        // стартовый уровень
+            val targetPeak = 22000        // ~67% от Short.MAX (запас на soft-clip)
+            val agcAttack = 0.3f          // быстрая реакция на громкие звуки
+            val agcRelease = 0.02f        // медленный спад
+            val agcMaxBoost = 4.0f        // не усиливаем тишину больше чем в 4x
+            val agcMinBoost = 0.5f
+            val noiseFloor = 600          // ниже этого порога — это шум, не усиливаем
+
             try {
                 while (isActive && isCapturing) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     when {
                         read > 0 -> {
-                            val g = micGain
-                            if (g != 1.0f) {
-                                for (i in 0 until read) {
-                                    val amplified = (buffer[i] * g).toInt()
-                                        .coerceIn(Short.MIN_VALUE.toInt(), Short.MAX_VALUE.toInt())
-                                    buffer[i] = amplified.toShort()
+                            // 1. Найти пик в чанке
+                            var localPeak = 0
+                            for (i in 0 until read) {
+                                val v = kotlin.math.abs(buffer[i].toInt())
+                                if (v > localPeak) localPeak = v
+                            }
+
+                            // 2. Обновить rollingPeak (быстрая атака, медленный релиз)
+                            rollingPeak = if (localPeak > rollingPeak) {
+                                (rollingPeak + (localPeak - rollingPeak) * agcAttack).toInt()
+                            } else {
+                                (rollingPeak - (rollingPeak - localPeak) * agcRelease).toInt()
+                            }
+                            if (rollingPeak < noiseFloor) rollingPeak = noiseFloor
+
+                            // 3. Расчёт коэффициента AGC
+                            val agcGain = (targetPeak.toFloat() / rollingPeak.toFloat())
+                                .coerceIn(agcMinBoost, agcMaxBoost)
+
+                            // 4. Финальное усиление = AGC × ручной gain пользователя
+                            val finalGain = agcGain * micGain
+
+                            // 5. Применить + soft-clip
+                            for (i in 0 until read) {
+                                val amplified = (buffer[i] * finalGain).toInt()
+                                buffer[i] = when {
+                                    amplified > Short.MAX_VALUE -> Short.MAX_VALUE
+                                    amplified < Short.MIN_VALUE -> Short.MIN_VALUE
+                                    else -> amplified.toShort()
                                 }
                             }
+
                             byteBuffer.clear()
                             byteBuffer.asShortBuffer().put(buffer, 0, read)
                             _micOutput.tryEmit(rawBytes.copyOf(read * 2))
                         }
                         read == 0 -> {
-                            // Нет данных — yield чтобы не busy-loop в граничных случаях
                             yield()
                         }
                         else -> {
-                            // read < 0 — ERROR_INVALID_OPERATION / ERROR_DEAD_OBJECT и т.п.
-                            // Также приходит сюда после recorder.stop() — это нормально, выходим.
                             logger.d("AudioRecord.read returned $read — exiting loop")
                             break
                         }
