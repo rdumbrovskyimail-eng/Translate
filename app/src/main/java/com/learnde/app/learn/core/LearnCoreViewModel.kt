@@ -392,9 +392,17 @@ class LearnCoreViewModel @Inject constructor(
 
                 logger.d("Translator FN-transcript: [${pair.sourceLang}] '${pair.original}' → '${pair.translation}'")
 
+                // ВАЖНО: все мутации делаем АТОМАРНО под одним withLock,
+                // иначе race condition: между удалением live-bubble и сбросом
+                // liveModelMessageTs = 0L успевает прилететь поздняя дельта,
+                // и upsertLiveModelBubble создаст новый "хвостовой" пузырь.
                 transcriptMutex.withLock {
-                    // 1. Удаляем live-bubble модели (он мог быть создан outputTranscription'ом как fallback)
-                    val filtered = transcriptBuffer.filterNot { it.timestamp == liveModelMessageTs }
+                    // 1. Удаляем live-bubble модели (он мог быть создан outputTranscription'ом)
+                    val filtered = if (liveModelMessageTs != 0L) {
+                        transcriptBuffer.filterNot { it.timestamp == liveModelMessageTs }
+                    } else {
+                        transcriptBuffer
+                    }
 
                     // 2. Добавляем точную пару USER + MODEL
                     val now = System.currentTimeMillis()
@@ -410,20 +418,24 @@ class LearnCoreViewModel @Inject constructor(
                     )
                     val next = (filtered + userMsg + modelMsg).takeLast(MAX_TRANSCRIPT_SIZE)
                     transcriptBuffer = next
+
+                    // 3. Сбрасываем буферы дельт ВНУТРИ withLock — атомарно с обновлением transcript.
+                    //    Это гарантирует что новый upsertLiveModelBubble увидит корректное состояние:
+                    //    либо liveModelMessageTs = 0L (старый bubble уже удалён),
+                    //    либо ещё старый ts (но тогда он находится в buffer и обновится корректно).
+                    liveModelMessageTs = 0L
+                    userTurnBuffer.clear()
+                    modelTurnBuffer.clear()
+
+                    // 4. Помечаем turn как завершённый функцией —
+                    //    приходящие позже OutputTranscript-дельты должны игнорироваться,
+                    //    иначе они создадут "хвостовой" пузырь типа "essen." или "ist.".
+                    translatorFunctionFinalizedThisTurn = true
+
                     _state.update {
                         it.copy(transcript = next, liveUserTranscript = "")
                     }
                 }
-
-                // 3. Сбрасываем буферы дельт — их данные больше не нужны
-                liveModelMessageTs = 0L
-                userTurnBuffer.clear()
-                modelTurnBuffer.clear()
-
-                // 4. Помечаем turn как завершённый функцией —
-                //    приходящие позже OutputTranscript-дельты должны игнорироваться,
-                //    иначе они создадут "хвостовой" пузырь типа "essen." или "ist."
-                translatorFunctionFinalizedThisTurn = true
             }
         }
     }
