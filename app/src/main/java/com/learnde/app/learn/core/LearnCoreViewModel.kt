@@ -964,7 +964,10 @@ class LearnCoreViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.InputTranscript -> {
-                        transcriptChannel.trySend(TranscriptOp.UserDelta(event.text))
+                        // Для translator транскрипция отключена и не нужна
+                        if (activeSession?.id != "translator") {
+                            transcriptChannel.trySend(TranscriptOp.UserDelta(event.text))
+                        }
                     }
 
                     is GeminiEvent.OutputTranscript -> {
@@ -972,16 +975,13 @@ class LearnCoreViewModel @Inject constructor(
                             awaitingInitialGreeting = false
                             greetingFallbackJob?.cancel()
                         }
+                        // Для translator outputAudioTranscription выключен — событие приходить не должно.
+                        // Если вдруг придёт — игнорируем, чтобы не создать "хвостовых" пузырей.
+                        if (activeSession?.id == "translator") return@collect
+
                         if (lastAiAudioChunkAtMs == 0L
                             || (System.currentTimeMillis() - lastAiAudioChunkAtMs) > 500) {
                             startTextWithoutAudioWatchdog()
-                        }
-                        if (activeSession?.id == "translator") {
-                            lastModelActivityAtMs = System.currentTimeMillis()
-                            hasModelOutputThisTurn = true
-                            startStuckTurnWatchdog()
-                            // Для translator outputTranscription — это FALLBACK.
-                            // Если придёт record_translation — observeTranslatorFunctionTranscripts его перезапишет.
                         }
                         transcriptChannel.trySend(TranscriptOp.ModelDelta(event.text, "OutputTranscript"))
                     }
