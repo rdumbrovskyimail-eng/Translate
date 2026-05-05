@@ -136,7 +136,7 @@ data class SessionConfig(
          * Model ID для WebSocket BidiGenerateContent.
          * БЕЗ префикса "models/"!
          */
-        const val DEFAULT_MODEL = "gemini-live-2.5-flash-native-audio"
+        const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 
         const val DEFAULT_SYSTEM_INSTRUCTION =
             "Ты русскоязычный голосовой ассистент. " +
