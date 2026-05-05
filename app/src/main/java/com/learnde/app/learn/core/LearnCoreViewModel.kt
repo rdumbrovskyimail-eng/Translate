@@ -348,8 +348,14 @@ class LearnCoreViewModel @Inject constructor(
                 runCatching { audioEngine.onTurnComplete() }
                 modelStartedSpeakingThisTurn = false
                 hasModelOutputThisTurn = false
+                translatorFunctionFinalizedThisTurn = false
                 _state.update { it.copy(isAiSpeaking = false) }
                 lastAiAudioChunkAtMs = 0L
+                // Принудительно открываем микрофон на 1 секунду — после watchdog
+                // пользователь должен сразу мочь говорить, без задержек.
+                if (activeSession?.id == "translator") {
+                    translatorForceMicOpenUntilMs = System.currentTimeMillis() + 1000L
+                }
                 cancelTextWithoutAudioWatchdog()
             }
         }
