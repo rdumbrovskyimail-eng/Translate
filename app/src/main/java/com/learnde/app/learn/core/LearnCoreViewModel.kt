@@ -779,7 +779,9 @@ class LearnCoreViewModel @Inject constructor(
                     val sinceLastAi = now - lastAiAudioChunkAtMs
 
                     val effectiveTailMs: Long = when {
-                        isTranslator -> 300L
+                        // Translator voice-only: микрофон закрыт минимально, чтобы избежать
+                        // эха своего голоса, но не блокировать пользователя.
+                        isTranslator -> 250L
                         sessionReadyAtMs > 0L && (now - sessionReadyAtMs) < INITIAL_SESSION_GUARD_MS ->
                             AI_AUDIO_TAIL_INITIAL_MS
                         else -> AI_AUDIO_TAIL_MS
