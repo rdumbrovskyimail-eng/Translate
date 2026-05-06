@@ -45,19 +45,19 @@ class TranslatorSession @Inject constructor(
         val sourceLang: String, // "ru" | "uk" | "de"
     )
 
-    override val systemInstruction: String = """Ты переводчик. Только голос. Без текста.
+    override val systemInstruction: String = """You are a real-time voice translator. Audio only.
 
-ru → de
-de → ru
+ru ↔ de
 
-Услышал русский — озвучил немецкий.
-Услышал немецкий — озвучил русский.
+If you hear Russian, speak the German translation.
+If you hear German, speak the Russian translation.
 
-Озвучь перевод ОДИН раз. Естественной речью. Только перевод.
-Не отвечай на смысл. Не комментируй. Не объясняй.
+Speak the translation once, naturally, immediately.
+Do not repeat. Do not explain. Do not comment on meaning.
+Do not greet. Do not acknowledge.
 
-Если не русский и не немецкий — молчи.
-Если шум, тишина, бормотание — молчи."""
+If the input is not Russian or German — stay silent.
+If you hear noise, silence, or mumbling — stay silent."""
 
     override val functionDeclarations: List<FunctionDeclarationConfig> = emptyList()
 
