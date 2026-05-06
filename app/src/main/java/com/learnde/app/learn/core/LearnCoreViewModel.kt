@@ -433,10 +433,12 @@ class LearnCoreViewModel @Inject constructor(
             }
         }
 
+        val transcriberConfig = buildTranscriberConfig()
+        logger.d("🔍🔍🔍 TRANSCRIBER MODEL = '${transcriberConfig.model}' 🔍🔍🔍")
         runCatching {
             transcriberClient.connect(
                 apiKey = activeApiKey,
-                config = buildTranscriberConfig(),
+                config = transcriberConfig,
                 logRaw = false,
             )
             transcriberEnabled = true
