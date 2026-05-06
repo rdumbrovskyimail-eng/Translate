@@ -861,8 +861,11 @@ class LearnCoreViewModel @Inject constructor(
             activeSession = null
         }
 
-        // Translator работает на одном audio-клиенте с input/output audio transcription.
-        // Параллельный text-клиент отключён — он добавлял латентность из-за общего rate-pool.
+        // Translator: запускаем параллельный text-клиент для качественного транскрипта.
+        // Failure здесь НЕ критичен — voice-клиент работает независимо.
+        if (session.id == "translator" && activeSession != null) {
+            startTranscriberClient()
+        }
 
         logger.d("◀ Learn.startInternal — awaiting SetupComplete")
     }
