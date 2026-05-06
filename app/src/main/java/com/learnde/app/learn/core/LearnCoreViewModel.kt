@@ -110,6 +110,11 @@ class LearnCoreViewModel @Inject constructor(
     private var transcriberObserverJob: Job? = null
     @Volatile private var transcriberEnabled: Boolean = false
 
+    // Буфер дельт текущего turn'а транскриптора (накапливается до TurnComplete).
+    private val transcriberBuffer = StringBuilder()
+    private val origRegex = Regex("""ORIG:\s*(.+?)(?=\n\s*TRANS:|$)""", RegexOption.DOT_MATCHES_ALL)
+    private val transRegex = Regex("""TRANS:\s*(.+?)$""", RegexOption.DOT_MATCHES_ALL)
+
     @Volatile private var lastInputTs: Long = 0L
     @Volatile private var modelStartedSpeakingThisTurn = false
     @Volatile private var awaitingInitialGreeting = false
