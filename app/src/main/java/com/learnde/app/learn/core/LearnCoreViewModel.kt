@@ -1033,15 +1033,6 @@ Strict rules:
                 audioEngine.startCapture()
             }
         }
-                    } else {
-                        droppedMicChunks++
-                    }
-                }
-            }
-            micOperationMutex.withLock {
-                audioEngine.startCapture()
-            }
-        }
     }
 
     private fun stopMic() {
