@@ -562,7 +562,7 @@ Strict rules:
 - One utterance = one ORIG/TRANS pair.""".trimIndent()
 
         return SessionConfig(
-            model = cachedSettings.model,
+            model = "gemini-live-2.5-flash-preview",
             responseModality = "TEXT",
             temperature = 0.3f,
             topP = 0.9f,
