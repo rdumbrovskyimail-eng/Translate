@@ -977,10 +977,7 @@ class LearnCoreViewModel @Inject constructor(
                         }
                         // Для translator OutputTranscript игнорируем —
                         // record_translation function call даёт точный перевод.
-                        // Транскрипция Gemini Live мисхёрит и создаёт лишние пузыри.
-                        if (activeSession?.id == "translator") {
-                            // НЕ делаем return@collect — это прервёт другие события в том же frame
-                        } else {
+                        if (activeSession?.id != "translator") {
                             if (lastAiAudioChunkAtMs == 0L
                                 || (System.currentTimeMillis() - lastAiAudioChunkAtMs) > 500) {
                                 startTextWithoutAudioWatchdog()
