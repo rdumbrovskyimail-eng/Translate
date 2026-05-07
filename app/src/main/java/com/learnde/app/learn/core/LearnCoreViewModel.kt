@@ -945,6 +945,13 @@ class LearnCoreViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.TurnComplete -> {
+                        // Vosk: форсим finalize playback-recognizer'а — без этого
+                        // partial накапливается между фразами Gemini и склеивается
+                        // с следующим ответом ("hallo wie geht es" + "was" → "hallo wie geht es wir was")
+                        if (activeSession?.id == "translator") {
+                            voskTranscriber.finalizePlayback()
+                        }
+
                         // Для translator: если record_translation уже сработал —
                         // observeTranslatorFunctionTranscripts уже добавил финальную пару.
                         // Финализация буферов всё равно нужна — finalizeUserTurn/finalizeModelTurn
