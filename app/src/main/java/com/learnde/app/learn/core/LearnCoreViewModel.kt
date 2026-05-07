@@ -164,7 +164,7 @@ class LearnCoreViewModel @Inject constructor(
         observeGeminiEvents()
         observeArbiter()
         observeVocabularyViolations()
-        // observeTranslatorFunctionTranscripts() — убрано: voice-only режим без функций
+        observeVoskEvents()
         startTranscriptProcessor()
         viewModelScope.launch { audioEngine.initPlayback() }
     }
@@ -887,8 +887,11 @@ class LearnCoreViewModel @Inject constructor(
         // Translator работает на одном audio-клиенте с input/output audio transcription.
         // Параллельный text-клиент отключён — он добавлял латентность из-за общего rate-pool.
 
-        // Translator: запускаем Vosk-транскрайбер для серого preview-текста
+        // Translator: ресет пар + старт Vosk-транскрайбера.
+        // Подписка на события Vosk живёт в init{} через observeVoskEvents() —
+        // здесь только запуск самого транскрайбера.
         if (session.id == "translator") {
+            resetTranslatorPairs()
             viewModelScope.launch {
                 runCatching {
                     voskTranscriber.start(
@@ -898,20 +901,6 @@ class LearnCoreViewModel @Inject constructor(
                     )
                 }.onFailure { e ->
                     logger.e("VoskTranscriber start failed: ${e.message}", e)
-                }
-            }
-        }
-
-        // [ВРЕМЕННО, для теста Шаг 3] — слушаем события Vosk и логируем
-        if (session.id == "translator") {
-            viewModelScope.launch {
-                voskTranscriber.events.collect { event ->
-                    when (event) {
-                        is com.learnde.app.data.vosk.VoskEvent.Partial ->
-                            logger.d("VOSK[${event.source}/${event.lang}] partial: '${event.text}'")
-                        is com.learnde.app.data.vosk.VoskEvent.Final ->
-                            logger.d("VOSK[${event.source}/${event.lang}] FINAL:   '${event.text}'")
-                    }
                 }
             }
         }
