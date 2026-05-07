@@ -76,6 +76,7 @@ import androidx.core.content.ContextCompat
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.learnde.app.R
 import com.learnde.app.learn.core.LearnConnectionStatus
+import com.learnde.app.learn.core.TranslationPair
 import com.learnde.app.learn.core.LearnCoreIntent
 import com.learnde.app.learn.core.LearnCoreViewModel
 
@@ -113,25 +114,7 @@ private object GeminiPalette {
     val Danger              = Color(0xFFEA4335)
 }
 
-// ═══════════════════════════════════════════════════════════
-//  МОДЕЛЬ ЭКРАНА — пара "оригинал + перевод" в одной карточке
-// ═══════════════════════════════════════════════════════════
 
-/**
- * Состояние одной пары в чате.
- * Текст приходит от Vosk (серый) и заменяется на Gemini (чёрный) когда REST вернёт.
- */
-private data class TranslationPair(
-    val id: Long,
-    val originalText: String,
-    val translationText: String,
-    val originalIsFinal: Boolean,      // true = Vosk выдал FINAL, false = partial
-    val translationIsFinal: Boolean,
-    val originalIsRefined: Boolean,    // true = Gemini REST подтвердил → чёрный
-    val translationIsRefined: Boolean,
-    val originalLang: String,          // "RU" / "DE" / ""
-    val translationLang: String,
-)
 
 // ═══════════════════════════════════════════════════════════
 //  MAIN SCREEN
@@ -149,9 +132,9 @@ fun TranslatorScreen(
     val isActive = learnState.sessionId == "translator" &&
         learnState.connectionStatus != LearnConnectionStatus.Disconnected
 
-    // TODO: на следующем шаге пары будут приходить из VoskTranscriber.events.
-    // Сейчас — пустая заглушка для верстки.
-    val pairs = remember { mutableStateOf<List<TranslationPair>>(emptyList()) }
+    // Пары приходят из state.translatorPairs (формируются в LearnCoreViewModel
+    // при получении событий VoskTranscriber).
+    val pairs = learnState.translatorPairs
 
     val activity = context as? android.app.Activity
     var showRationaleDialog by remember { mutableStateOf(false) }
@@ -222,10 +205,10 @@ fun TranslatorScreen(
                     .fillMaxWidth()
                     .weight(1f),
             ) {
-                if (pairs.value.isEmpty()) {
+                if (pairs.isEmpty()) {
                     EmptyState(isActive = isActive)
                 } else {
-                    PairsList(pairs = pairs.value)
+                    PairsList(pairs = pairs)
                 }
             }
 
