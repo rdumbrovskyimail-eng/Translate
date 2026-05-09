@@ -473,16 +473,32 @@ private fun TranscriptBlock(
 }
 
 @Composable
-private fun StatusIndicator(isFinal: Boolean) {
-    val text = if (isFinal) "✓" else "..."
-    val color = if (isFinal) Color(0xFF4CAF50) else GeminiPalette.TextMuted
-    
-    Text(
-        text = text,
-        fontSize = 12.sp,
-        fontWeight = FontWeight.Bold,
-        color = color
-    )
+private fun StatusIndicator(isFinal: Boolean, isRefined: Boolean) {
+    val text = when {
+        isRefined -> "✓✓"
+        isFinal -> "✓"
+        else -> "..."
+    }
+    val color = when {
+        isRefined -> Color(0xFF1A73E8) // BrandBlue для финального уточнения
+        isFinal -> Color(0xFF4CAF50)   // Зеленый для подтвержденного
+        else -> GeminiPalette.TextMuted
+    }
+
+    AnimatedContent(
+        targetState = text,
+        transitionSpec = {
+            (scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn()) togetherWith fadeOut()
+        },
+        label = "statusIndicator"
+    ) { targetText ->
+        Text(
+            text = targetText,
+            fontSize = 12.sp,
+            fontWeight = FontWeight.Bold,
+            color = color
+        )
+    }
 }
 
 @Composable
