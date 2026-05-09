@@ -1111,29 +1111,30 @@ class LearnCoreViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.TurnComplete -> {
+                        // ТРАНСЛЭЙТОР ФАЗА 2: Отключаем галочку '...' в статику Серого цвета и шлем на текст проверку
                         if (activeSession?.id == "translator" && currentOpenPairId != null) {
-                            updatePair(currentOpenPairId!!) { it.copy(translationIsFinal = true) }
+                            val finalizePairId = currentOpenPairId!!
+                            updatePair(finalizePairId) { it.copy(translationIsFinal = true, originalIsFinal = true) }
                             currentPairTranslationFinalized = true
+                            
+                            triggerRestRefinementCheck(finalizePairId) // 🚀 Async Arbiter Trigger
                         }
 
-                        // Для translator: если record_translation уже сработал —
-                        // observeTranslatorFunctionTranscripts уже добавил финальную пару.
-                        // Финализация буферов всё равно нужна — finalizeUserTurn/finalizeModelTurn
-                        // знают про anti-duplicate и пропустят дубль.
+                        // Дефолтная очистка для обычного чата и Восков
                         transcriptChannel.trySend(TranscriptOp.UserTurnComplete)
                         transcriptChannel.trySend(TranscriptOp.ModelTurnComplete)
+                        
                         modelStartedSpeakingThisTurn = false
                         hasModelOutputThisTurn = false
-                        // Сбрасываем флаг — следующий turn ещё не финализирован функцией
                         translatorFunctionFinalizedThisTurn = false
+                        
                         cancelStuckTurnWatchdog()
                         cancelTextWithoutAudioWatchdog()
-
                         audioEngine.onTurnComplete()
                         _state.update { it.copy(isAiSpeaking = false) }
-
+                        
                         flushPendingVocabViolation()
-
+                        
                         lastInputTs = System.currentTimeMillis()
                         val now = System.currentTimeMillis()
                         val cooldownPassed = (now - lastSilencePromptAtMs) > SILENCE_PROMPT_COOLDOWN_MS
