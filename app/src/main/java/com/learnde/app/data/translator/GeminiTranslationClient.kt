@@ -43,7 +43,7 @@ class GeminiTranslationClient @Inject constructor(
         // Самая быстрая модель Gemini 3 series для коротких задач
         private const val MODEL = "gemini-3-flash-preview"
         private const val ENDPOINT = "https://generativelanguage.googleapis.com" +
-            "/v1beta/models/$MODEL:streamGenerateContent"
+            "/v1beta/models/$MODEL:generateContent"
 
         // Стрим возвращает chunks с alt=sse (SSE стандарт). Без alt — JSON-array.
         // Мы используем JSON-array режим: ?key=...&alt=json — тогда ответ это
@@ -120,37 +120,18 @@ class GeminiTranslationClient @Inject constructor(
         //    потому что начинает отдавать данные сразу как только модель сгенерила
         //    первые токены). Для нашей задачи — JSON в одной фразе — выигрыш ~30-40%.
         val request = Request.Builder()
-            .url("$ENDPOINT?key=$apiKey&alt=sse")
+            .url("$ENDPOINT?key=$apiKey")
             .post(rawBody.toRequestBody("application/json".toMediaType()))
             .build()
 
-        val responseBuilder = StringBuilder()
-
-        try {
+        val rawResponse: String = try {
             httpClient.newCall(request).execute().use { resp ->
                 if (!resp.isSuccessful) {
                     val errBody = resp.body?.string().orEmpty().take(500)
                     logger.e("GeminiTranslate ← HTTP ${resp.code}: $errBody")
                     throw IllegalStateException("Gemini REST ${resp.code}: $errBody")
                 }
-
-                // SSE stream: каждый event = "data: <json>\n\n"
-                val reader = resp.body?.byteStream()?.bufferedReader()
-                    ?: throw IllegalStateException("Empty response body")
-
-                reader.useLines { lines ->
-                    for (line in lines) {
-                        if (!line.startsWith("data:")) continue
-                        val payload = line.substringAfter("data:").trim()
-                        if (payload.isEmpty() || payload == "[DONE]") continue
-
-                        // Извлекаем text из chunk'а и аккумулируем
-                        val chunkText = extractTextFromChunk(payload)
-                        if (chunkText.isNotEmpty()) {
-                            responseBuilder.append(chunkText)
-                        }
-                    }
-                }
+                resp.body?.string() ?: throw IllegalStateException("Empty response body")
             }
         } catch (e: Exception) {
             val elapsed = System.currentTimeMillis() - startedAt
@@ -159,11 +140,10 @@ class GeminiTranslationClient @Inject constructor(
         }
 
         val elapsed = System.currentTimeMillis() - startedAt
-        val fullJson = responseBuilder.toString().trim()
-        logger.d("GeminiTranslate ← ${elapsed}ms, ${fullJson.length} chars")
+        logger.d("GeminiTranslate ← ${elapsed}ms, ${rawResponse.length} chars")
 
-        // 4. Парсим финальный JSON {"original": "...", "translation": "..."}
-        return@withContext parseFinalJson(fullJson)
+        val generatedText = extractTextFromChunk(rawResponse)
+        return@withContext parseFinalJson(generatedText)
     }
 
     /** Извлекает .candidates[0].content.parts[*].text из одного chunk'а */
@@ -240,19 +220,23 @@ class GeminiTranslationClient @Inject constructor(
         ((v ushr 8) and 0xff).toByte(),
     )
 
-    private val PROMPT = """You are a real-time bilingual transcription engine.
+    private val PROMPT = """You are a real-time bilingual transcriber and translator.
 
-The user spoke in Russian or German. Your task:
-1. Transcribe what they said in the original language, exactly as spoken.
-2. Translate: ru → de, or de → ru.
+The audio contains short user speech in Russian OR German.
 
-Return ONLY valid JSON in this exact format:
-{"original": "exact transcribed text in original language", "translation": "translation in the other language"}
+TASK:
+1. Transcribe ONLY what was actually clearly said. Do NOT guess. Do NOT extend short phrases.
+2. Translate: ru → de, OR de → ru.
 
-Strict rules:
-- ONLY Russian or German. No English, no other languages.
-- Empty/silent/unclear audio → {"original": "", "translation": ""}
-- No comments, no explanations, no extra fields. Pure JSON only.""".trimIndent()
+OUTPUT FORMAT — strict JSON only, no markdown:
+{"original": "<exact transcript>", "translation": "<translation>"}
+
+CRITICAL RULES:
+- Audio may be short (1-3 sec) — that is normal. Don't fabricate longer text.
+- If you hear "Привет" — output exactly "Привет", NOT "Привет, как дела".
+- Use ONLY Russian and German. Never any other language.
+- If audio is silent, mumbled, only background noise, or non-RU/non-DE → return {"original": "", "translation": ""}.
+- No greetings of your own. No comments. Pure JSON only.""".trimIndent()
 }
 
 data class TranslationResult(
