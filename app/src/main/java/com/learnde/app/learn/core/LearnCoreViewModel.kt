@@ -958,6 +958,20 @@ class LearnCoreViewModel @Inject constructor(
                         _state.update { it.copy(isAiSpeaking = false) }
                         cancelStuckTurnWatchdog()
                         cancelTextWithoutAudioWatchdog()
+
+                        // Translator: как только Gemini закончила генерацию — стартуем REST зеркальный перевод.
+                        // Не ждём TurnComplete (там ещё ~500-1000мс на доигрывание audio buffer).
+                        if (activeSession?.id == "translator") {
+                            val pairId = currentOpenPairId
+                            if (pairId != null) {
+                                val geminiAsrText = _state.value.translatorPairs
+                                    .find { it.id == pairId }?.translationText.orEmpty().trim()
+                                if (geminiAsrText.isNotEmpty()) {
+                                    updatePair(pairId) { it.copy(translationIsFinal = true) }
+                                    triggerMirrorTranslation(pairId, geminiAsrText)
+                                }
+                            }
+                        }
                     }
 
                     is GeminiEvent.InputTranscript -> {
