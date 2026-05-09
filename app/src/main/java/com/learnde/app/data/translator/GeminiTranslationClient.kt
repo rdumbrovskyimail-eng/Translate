@@ -32,15 +32,18 @@ class GeminiTranslationClient @Inject constructor(
     private val json = Json { ignoreUnknownKeys = true; isLenient = true }
 
     // Жесткие короткие таймауты: модель-лайт отвечает за миллисекунды!
+    // Настраиваем ConnectionPool для повторного использования соединений (убирает 100-200мс на TLS-handshake)
     private val httpClient = OkHttpClient.Builder()
         .callTimeout(5, TimeUnit.SECONDS)
+        .connectionPool(okhttp3.ConnectionPool(5, 5, TimeUnit.MINUTES))
         .build()
 
     suspend fun reverseTranslate(textFromSocket: String, apiKey: String): ReverseResult = withContext(Dispatchers.IO) {
         if (textFromSocket.isBlank()) return@withContext ReverseResult("", "")
 
         val reqStart = System.currentTimeMillis()
-        val sysPrompt = "Если текст на немецком — выведи русский перевод. Если текст на русском — выведи немецкий перевод. Никаких комментариев, только результат."
+        // Ультра-короткий промпт для минимизации задержки TTFT (Time To First Token)
+        val sysPrompt = "Если текст немецкий - верни русский перевод. Если русский - немецкий. Только перевод, без комментариев."
 
         val body = buildJsonObject {
             put("systemInstruction", buildJsonObject {
