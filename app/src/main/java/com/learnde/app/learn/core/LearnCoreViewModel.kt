@@ -109,7 +109,6 @@ class LearnCoreViewModel @Inject constructor(
     private var greetingFallbackJob: Job? = null
     private var setupJob: Job? = null
     private var finishGraceJob: Job? = null
-    private var translateJob: Job? = null
 
     private var stuckTurnWatchdogJob: Job? = null
     private var textWithoutAudioJob: Job? = null
@@ -387,32 +386,32 @@ class LearnCoreViewModel @Inject constructor(
         return id
     }
 
-    private fun triggerReverseTranslation(pairId: Long, modelVoiceText: String) {
-        if (modelVoiceText.isBlank() || activeApiKey.isEmpty()) return
-        
-        translateJob?.cancel()
-        translateJob = viewModelScope.launch {
+    private fun triggerMirrorTranslation(pairId: Long, geminiVoiceText: String) {
+        if (geminiVoiceText.isBlank() || activeApiKey.isEmpty()) return
+
+        // НЕ отменяем предыдущие — каждая пара получает свою корутину.
+        // Это позволяет параллельно ждать REST для нескольких пар при быстром диалоге.
+        viewModelScope.launch {
             runCatching {
-                // Молниеносный микро-перевод "в обратную сторону" для 1-й колонки!
-                translationClient.reverseTranslate(modelVoiceText, activeApiKey)
+                translationClient.reverseTranslate(geminiVoiceText, activeApiKey)
             }.onSuccess { res ->
-                 // Высвечиваем зеленые ✓✓ 
-                 updatePair(pairId) { pair ->
-                     pair.copy(
-                         originalText = res.reconstructedText,
-                         originalLang = res.lang,
-                         translationLang = if(res.lang == "RU") "DE" else "RU",
-                         originalIsRefined = true,
-                         translationIsRefined = true 
-                     )
-                 }
-            }.onFailure { logger.w("API Reverse failed!") }
+                if (res.reconstructedText.isBlank()) return@onSuccess
+                updatePair(pairId) { pair ->
+                    val translationLang = detectLangSimple(geminiVoiceText)
+                    pair.copy(
+                        originalText = res.reconstructedText,
+                        originalLang = res.lang,
+                        translationLang = if (translationLang.isNotEmpty()) translationLang else pair.translationLang,
+                        originalIsRefined = true,
+                        translationIsRefined = true,
+                    )
+                }
+            }.onFailure { logger.w("Mirror translation failed: ${it.message}") }
         }
     }
     
     private fun resetTranslatorPairs() {
         currentOpenPairId = null
-        translateJob?.cancel()
         _state.update { it.copy(translatorPairs = emptyList()) }
     }
 
@@ -585,8 +584,6 @@ class LearnCoreViewModel @Inject constructor(
         }
         safeStopForegroundService()
 
-        translateJob?.cancel()
-        translateJob = null
         runCatching { liveClient.disconnect() }
         runCatching { session?.onExit() }
 
