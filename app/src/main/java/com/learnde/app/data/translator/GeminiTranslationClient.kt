@@ -26,8 +26,8 @@ class GeminiTranslationClient @Inject constructor(
     private val logger: AppLogger,
 ) {
     companion object {
-        // Используем стандартный flash - он быстрее всего отдает первый токен при работе с аудио
-        private const val MODEL = "gemini-3.1-flash"
+        // Возвращаем рабочую модель, которая не выдает 404
+        private const val MODEL = "gemini-3-flash-preview" 
         private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:streamGenerateContent"
     }
 
