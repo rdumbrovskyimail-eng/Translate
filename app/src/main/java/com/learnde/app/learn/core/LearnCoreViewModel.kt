@@ -215,34 +215,9 @@ class LearnCoreViewModel @Inject constructor(
 
         if (bufferedText.isEmpty()) return
 
-        // Для translator: если функция record_translation уже была вызвана,
-        // в transcript уже есть финальное user-сообщение.
-        // Не добавляем дубликат от inputAudioTranscription.
+        // Для translator: мы собираем текст напрямую в translatorPairs, 
+        // поэтому в общий transcript (для истории) писать не нужно, чтобы не было конфликтов.
         if (activeSession?.id == "translator") {
-            val waitStart = System.currentTimeMillis()
-            val maxWait = 1_200L
-            while (System.currentTimeMillis() - waitStart < maxWait) {
-                val lastUser = transcriptBuffer.lastOrNull { it.role == ConversationMessage.ROLE_USER }
-                // Окно 10 секунд: TurnComplete может прийти через 2-5 сек после функции,
-                // и мы должны узнать что функция уже отработала.
-                if (lastUser != null && (System.currentTimeMillis() - lastUser.timestamp) < 10_000L) {
-                    // record_translation уже записал точную пару — выходим без дублирования
-                    logger.d("finalizeUserTurn[translator]: skip dup, FN already wrote '${lastUser.text}'")
-                    return
-                }
-                kotlinx.coroutines.delay(50)
-            }
-            transcriptMutex.withLock {
-                val lastUser = transcriptBuffer.lastOrNull { it.role == ConversationMessage.ROLE_USER }
-                if (lastUser != null && (System.currentTimeMillis() - lastUser.timestamp) < 10_000L) {
-                    return@withLock
-                }
-                // Функция не пришла — это fallback, добавляем
-                val newMsg = ConversationMessage.user(bufferedText)
-                val next = (transcriptBuffer + newMsg).takeLast(MAX_TRANSCRIPT_SIZE)
-                transcriptBuffer = next
-                _state.update { it.copy(transcript = next) }
-            }
             return
         }
 
@@ -260,10 +235,8 @@ class LearnCoreViewModel @Inject constructor(
         if (cachedSettings.outputTranscription && source == "ModelText") return
         if (!cachedSettings.outputTranscription && source == "OutputTranscript") return
 
-        // Для translator: если record_translation уже завершил turn — игнорируем
-        // поздние OutputTranscript-дельты, которые иначе создадут "хвостовой" пузырь.
-        if (activeSession?.id == "translator" && translatorFunctionFinalizedThisTurn) {
-            return
+        if (activeSession?.id == "translator") {
+            return // Мы уже обрабатываем перевод напрямую в GeminiEvent.ModelText
         }
 
         // Первая дельта модели = модель начала отвечать = user-turn закончен.
@@ -290,10 +263,14 @@ class LearnCoreViewModel @Inject constructor(
         val finalText = modelTurnBuffer.toString().trim()
         modelTurnBuffer.clear()
 
-        // Для translator: если record_translation уже сработал — он удалил
-        // live-bubble и записал финальную пару, выставив liveModelMessageTs = 0L.
-        // В этом случае пропускаем upsert.
-        // Если функция НЕ пришла — fallback, оставляем upsert как есть.
+        if (activeSession?.id == "translator") {
+            liveModelMessageTs = 0L
+            hasModelOutputThisTurn = false
+            cancelStuckTurnWatchdog()
+            cancelTextWithoutAudioWatchdog()
+            return
+        }
+
         if (finalText.isNotEmpty() && liveModelMessageTs != 0L) {
             upsertLiveModelBubble(finalText)
         }
