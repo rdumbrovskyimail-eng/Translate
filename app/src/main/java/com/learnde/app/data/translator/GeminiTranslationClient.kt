@@ -80,6 +80,27 @@ class GeminiTranslationClient @Inject constructor(
             ReverseResult("", "")
         }
     }
+
+    suspend fun warmUp(apiKey: String) = withContext(Dispatchers.IO) {
+        if (apiKey.isEmpty()) return@withContext
+        runCatching {
+            val body = buildJsonObject {
+                put("contents", buildJsonArray {
+                    add(buildJsonObject {
+                        put("parts", buildJsonArray { add(buildJsonObject { put("text", "ok") }) })
+                    })
+                })
+                put("generationConfig", buildJsonObject {
+                    put("temperature", 0.0)
+                    put("maxOutputTokens", 1)
+                })
+            }
+            val request = Request.Builder().url("$ENDPOINT?key=$apiKey")
+                .post(body.toString().toRequestBody("application/json".toMediaType())).build()
+            httpClient.newCall(request).execute().close()
+            logger.d("REST warmup ✓")
+        }.onFailure { logger.d("REST warmup skipped: ${it.message}") }
+    }
 }
 
 data class ReverseResult(
