@@ -498,93 +498,51 @@ class LearnCoreViewModel @Inject constructor(
         _state.update { it.copy(translatorPairs = emptyList()) }
     }
 
-    /**
-     * Запускает перевод накопленного PCM-буфера через Gemini REST.
-     * Создаёт новую пару если её нет, иначе обновляет последнюю незакрытую.
-     */
-    private fun triggerRestTranslation() {
-        val audioBytes: ByteArray = synchronized(phraseAudioBuffer) {
-            val data = phraseAudioBuffer.toByteArray()
-            phraseAudioBuffer.reset()
-            data
-        }
+    private fun triggerRestRefinementCheck(targetPairId: Long) {
+        val snapshotPair = _state.value.translatorPairs.find { it.id == targetPairId } ?: return
+        
+        // Добыли тексты из текущих драфтов фазы (Прямо из оперативки!)
+        val localVosk = snapshotPair.originalText
+        val liveGermanVoice = snapshotPair.translationText
+        val alternativeLiveHumanASR = lastLiveInputTranscriptSnapshot
+        val currentKey = activeApiKey
+        
+        if (localVosk.isBlank() && liveGermanVoice.isBlank()) return
+        if (currentKey.isEmpty()) return
 
-        if (audioBytes.isEmpty()) {
-            logger.d("triggerRestTranslation: empty buffer, skipping")
-            return
-        }
-
-        if (activeApiKey.isEmpty()) {
-            logger.w("triggerRestTranslation: no API key")
-            return
-        }
-
-        // Создаём пустую пару СРАЗУ — пользователь увидит что система обрабатывает
-        val pairId = openNewPair()
-
-        // Отменяем предыдущий незавершённый запрос если есть (бывает при быстрой речи)
-        translateJob?.cancel()
-        translateJob = viewModelScope.launch {
-            val startedAt = System.currentTimeMillis()
+        refinementTranslateJob?.cancel() // Забираем предыдущие перехваты 
+        
+        refinementTranslateJob = viewModelScope.launch {
+            val beginTs = System.currentTimeMillis()
             runCatching {
-                translationClient.translate(audioBytes, activeApiKey) { partial ->
-                    updatePair(pairId) { pair ->
-                        pair.copy(
-                            originalText = partial.original,
-                            translationText = partial.translation,
-                            originalIsFinal = false,
-                            translationIsFinal = false,
-                            originalLang = detectLangSimple(partial.original),
-                            translationLang = detectLangSimple(partial.translation),
-                        )
-                    }
-                }
-            }.onSuccess { result ->
-                val elapsed = System.currentTimeMillis() - startedAt
-                logger.d("REST translate ✓ ${elapsed}ms: '${result.original}' → '${result.translation}'")
-
-                // Игнорируем пустые ответы (модель решила что это шум)
-                val origTrim = result.original.trim()
-                val transTrim = result.translation.trim()
-                val isEmpty = origTrim.isBlank() && transTrim.isBlank()
-                val isPlaceholder = origTrim.equals("silence", true) ||
-                    origTrim.equals("noise", true) ||
-                    origTrim.startsWith("[")
-                if (isEmpty || isPlaceholder) {
-                    logger.d("REST translate: discarding noise/empty result")
-                    _state.update { st ->
-                        st.copy(translatorPairs = st.translatorPairs.filterNot { it.id == pairId })
-                    }
-                    return@onSuccess
-                }
-
-                // Заполняем пару финальным чёрным текстом
-                updatePair(pairId) { pair ->
+                // Моментальная Флеш модель-арбитр. Передаем тексты: 
+                translationClient.refine(
+                    voskRawOriginal = localVosk, 
+                    socketInputTranscript = alternativeLiveHumanASR,
+                    liveTranslationRaw = liveGermanVoice,
+                    apiKey = currentKey
+                )
+            }.onSuccess { refinedRes ->
+                val took = System.currentTimeMillis() - beginTs
+                logger.d("REST Refinement Completed. \u2705 Took $took ms.")
+                
+                // РИСУЕМ ЗЕЛЕНЫЕ ГАЛОЧКИ ВОСШЕДШИЕ В UI С ОТКОРРЕКТИРОВАННЫМ ТЕКСТОМ:
+                updatePair(targetPairId) { pair ->
                     pair.copy(
-                        originalText = result.original,
-                        translationText = result.translation,
-                        originalIsFinal = true,
-                        translationIsFinal = true,
-                        originalIsRefined = true,
-                        translationIsRefined = true,
-                        originalLang = detectLangSimple(result.original),
-                        translationLang = detectLangSimple(result.translation),
+                        originalText = refinedRes.original,
+                        translationText = refinedRes.translation,
+                        originalLang = detectLangSimple(refinedRes.original), 
+                        translationLang = detectLangSimple(refinedRes.translation), 
+                        originalIsRefined = true,     // Зеленая ✓✓
+                        translationIsRefined = true   // Зеленая ✓✓ 
                     )
                 }
-                currentPairOriginalFinalized = true
-                currentPairTranslationFinalized = true
-            }.onFailure { e ->
-                val elapsed = System.currentTimeMillis() - startedAt
-                logger.e("REST translate ✗ ${elapsed}ms: ${e.message}")
-                // Удаляем пустую "ожидающую" пару при ошибке
-                _state.update { st ->
-                    st.copy(translatorPairs = st.translatorPairs.filterNot { it.id == pairId })
-                }
+            }.onFailure {
+                logger.w("REST Refinement failed! Kept Draft Gray Checks ✓. Err: ${it.message}")
             }
         }
     }
 
-    /** Простое определение языка по наличию кириллицы. */
     private fun detectLangSimple(text: String): String {
         if (text.isBlank()) return ""
         val hasCyrillic = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
