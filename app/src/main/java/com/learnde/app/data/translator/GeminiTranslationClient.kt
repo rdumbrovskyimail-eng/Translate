@@ -25,7 +25,7 @@ class GeminiTranslationClient @Inject constructor(
 ) {
     companion object {
         // Легкая и ультрабыстрая модель
-        private const val MODEL = "gemini-3.1-flash-lite-preview"
+        private const val MODEL = "gemini-3.1-flash-lite"
         private const val ENDPOINT = "https://generativelanguage.googleapis.com/v1beta/models/$MODEL:generateContent"
     }
 
