@@ -431,13 +431,17 @@ private fun TranscriptBlock(
                 append(if (isOriginal) "Распознано" else "Перевод")
                 if (lang.isNotEmpty()) append(" · $lang")
             }
-            Text(
-                label,
-                fontSize = 12.sp,
-                fontWeight = FontWeight.SemiBold,
-                color = GeminiPalette.TextSecondary,
-                letterSpacing = 0.5.sp,
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    label,
+                    fontSize = 12.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    color = GeminiPalette.TextSecondary,
+                    letterSpacing = 0.5.sp,
+                )
+                Spacer(Modifier.width(8.dp))
+                StatusIndicator(isFinal = isFinal)
+            }
         }
 
         Spacer(Modifier.height(8.dp))
@@ -456,6 +460,19 @@ private fun TranscriptBlock(
             )
         }
     }
+}
+
+@Composable
+private fun StatusIndicator(isFinal: Boolean) {
+    val text = if (isFinal) "✓" else "..."
+    val color = if (isFinal) Color(0xFF4CAF50) else GeminiPalette.TextMuted
+    
+    Text(
+        text = text,
+        fontSize = 12.sp,
+        fontWeight = FontWeight.Bold,
+        color = color
+    )
 }
 
 @Composable
