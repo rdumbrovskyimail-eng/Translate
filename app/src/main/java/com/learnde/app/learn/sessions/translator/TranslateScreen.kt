@@ -474,30 +474,43 @@ private fun TranscriptBlock(
 
 @Composable
 private fun StatusIndicator(isFinal: Boolean, isRefined: Boolean) {
-    val text = when {
-        isRefined -> "✓✓"
-        isFinal -> "✓"
-        else -> "..."
-    }
-    val color = when {
-        isRefined -> Color(0xFF1A73E8) // BrandBlue для финального уточнения
-        isFinal -> Color(0xFF4CAF50)   // Зеленый для подтвержденного
-        else -> GeminiPalette.TextMuted
+    val text: String
+    val color: Color
+    val targetSize: Float
+    
+    when {
+        // УРОВЕНЬ 3 (Конечный). Арбитраж пройден по API успешно
+        isRefined -> { 
+            text = "✓✓"
+            color = Color(0xFF4CAF50) // Premium Green 
+            targetSize = 13.sp.value 
+        }
+        // УРОВЕНЬ 2 (Тразишн-Чтение). Пользователь договорил. Данные собраны из Socket. Отдаем в API (0 мс)
+        isFinal -> { 
+            text = "✓"
+            color = GeminiPalette.TextMuted // Обычный серый драфт 
+            targetSize = 12.sp.value 
+        }
+        // УРОВЕНЬ 1. Живой поток от Воска или Websockets льет данные в процессе вашего разговора (Текст пишется сам) 
+        else -> { 
+            text = "···"
+            color = GeminiPalette.TextSecondary
+            targetSize = 14.sp.value 
+        }
     }
 
     AnimatedContent(
         targetState = text,
-        transitionSpec = {
-            (scaleIn(animationSpec = spring(dampingRatio = 0.6f)) + fadeIn()) togetherWith fadeOut()
-        },
-        label = "statusIndicator"
-    ) { targetText ->
-        Text(
-            text = targetText,
-            fontSize = 12.sp,
-            fontWeight = FontWeight.Bold,
-            color = color
-        )
+        transitionSpec = { fadeIn(tween(300)) togetherWith fadeOut(tween(300)) },
+        label = "statusIndicatorCheck"
+    ) { currentText -> 
+         Text(
+             text = currentText,
+             fontSize = targetSize.sp,
+             fontWeight = FontWeight.ExtraBold,
+             color = color,
+             letterSpacing = 1.sp
+         )
     }
 }
 
