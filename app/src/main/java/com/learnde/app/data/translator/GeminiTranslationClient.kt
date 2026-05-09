@@ -54,7 +54,11 @@ class GeminiTranslationClient @Inject constructor(
 
         val reqStart = System.currentTimeMillis()
         // Ультра-короткий промпт для минимизации задержки TTFT (Time To First Token)
-        val sysPrompt = "DE→RU or RU→DE. Output translation only."
+        val sysPrompt = """You are a translator. Detect the language of the input.
+If input is German → output ONLY the Russian translation.
+If input is Russian → output ONLY the German translation.
+Never repeat the input. Never output the same language as the input.
+Never add quotes, comments, or explanations. Output only the translated sentence."""
 
         val body = buildJsonObject {
             put("systemInstruction", buildJsonObject {
