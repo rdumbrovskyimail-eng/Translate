@@ -881,9 +881,18 @@ class LearnCoreViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.Interrupted -> {
-                        // При barge-in: модель НЕ успеет вызвать record_translation.
-                        // Финализируем то что собралось через input/outputTranscription
-                        // как fallback — иначе transcript останется пустым.
+                        // Translator: при barge-in закрываем текущую пару и стартуем mirror на том что успело прийти.
+                        if (activeSession?.id == "translator" && currentOpenPairId != null) {
+                            val pairId = currentOpenPairId!!
+                            val partial = _state.value.translatorPairs
+                                .find { it.id == pairId }?.translationText.orEmpty().trim()
+                            updatePair(pairId) { it.copy(originalIsFinal = true, translationIsFinal = true) }
+                            if (partial.isNotEmpty()) {
+                                triggerMirrorTranslation(pairId, partial)
+                            }
+                            currentOpenPairId = null
+                        }
+
                         transcriptChannel.trySend(TranscriptOp.UserTurnComplete)
                         transcriptChannel.trySend(TranscriptOp.ModelTurnComplete)
                         audioEngine.flushPlayback()
