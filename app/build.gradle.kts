@@ -68,11 +68,6 @@ android {
         }
     }
 
-    // Vosk-модели не сжимаются при упаковке APK — нужен прямой доступ к файлам
-    androidResources {
-        noCompress += listOf("mdl", "fst", "int", "txt", "ie", "scp")
-    }
-
     packaging {
         jniLibs {
             keepDebugSymbols += "**/*.so"
@@ -86,7 +81,6 @@ android {
                 "META-INF/LGPL2.1",
             )
             pickFirsts += setOf(
-                "**/libc++_shared.so",
             )
         }
     }
@@ -151,10 +145,4 @@ dependencies {
 
     // ====================== SCENEVIEW ======================
     implementation("io.github.sceneview:arsceneview:3.5.2")
-
-    // ====================== VOSK (offline ASR) ======================
-    // Серый preview-транскрипт пока Gemini REST не вернёт точный перевод.
-    // JNA нужен для нативного биндинга Vosk.
-    implementation("net.java.dev.jna:jna:5.13.0@aar")
-    implementation("com.alphacephei:vosk-android:0.3.47@aar")
 }
