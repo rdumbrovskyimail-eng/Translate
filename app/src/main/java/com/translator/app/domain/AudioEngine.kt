@@ -1,6 +1,7 @@
 package com.translator.app.domain
 
 import kotlinx.coroutines.flow.Flow
+import com.translator.app.domain.model.AudioChunk
 
 /**
  * Абстракция аудио-подсистемы.
@@ -11,7 +12,7 @@ import kotlinx.coroutines.flow.Flow
  */
 interface AudioEngine {
 
-    val micOutput: Flow<ByteArray>
+    val micOutput: Flow<AudioChunk>
     val isCapturing: Boolean
     val isPlaying: Boolean
 
