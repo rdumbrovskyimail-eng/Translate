@@ -232,22 +232,31 @@ class NativeSpeechTranscriber @Inject constructor(
     private fun scheduleRestart(switchLang: Boolean, errorBackoff: Boolean = false) {
         if (!running || restartScheduled) return
         restartScheduled = true
+
+        // При unsupported-language даём больший backoff чтобы не молотить логи
+        val delayMs = if (errorBackoff) 500L else 200L
+
         mainHandler.postDelayed({
             restartScheduled = false
             if (!running) return@postDelayed
+
             if (switchLang) {
-                val nextLang = if (activeLang == "ru-RU") "de-DE" else "ru-RU"
-                val isNextSupported = if (nextLang == "ru-RU") ruSupported else deSupported
-                
-                if (isNextSupported) {
-                    activeLang = nextLang
-                    logger.d("NativeSpeech: switching lang → $activeLang")
-                } else {
-                    logger.d("NativeSpeech: next lang $nextLang not supported, staying on $activeLang")
+                // Переключаемся только на ПОДДЕРЖИВАЕМЫЙ язык
+                val candidate = if (activeLang == "ru-RU") "de-DE" else "ru-RU"
+                val candidateSupported = if (candidate == "ru-RU") ruSupported else deSupported
+                activeLang = if (candidateSupported) candidate else activeLang
+                logger.d("NativeSpeech: lang → $activeLang (ru=$ruSupported, de=$deSupported)")
+            } else {
+                // Если текущий язык вдруг стал unsupported — мигрируем на оставшийся
+                val currentSupported = if (activeLang == "ru-RU") ruSupported else deSupported
+                if (!currentSupported) {
+                    activeLang = if (ruSupported) "ru-RU" else "de-DE"
+                    logger.d("NativeSpeech: forced lang → $activeLang")
                 }
             }
+
             startListeningInternal(activeLang)
-        }, if (errorBackoff) 1000L else 200L)
+        }, delayMs)
     }
 
     private fun langCodeShort(full: String): String = when {
