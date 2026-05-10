@@ -2,12 +2,13 @@
 // ПОЛНАЯ ЗАМЕНА
 // Путь: app/src/main/java/com/translator/app/data/AndroidAudioEngine.kt
 //
-// ФИКСЫ:
-//   [1] stopCapture: сначала recorder.stop() (будит блокирующий read),
-//       потом captureJob.cancelAndJoin(), потом release(). Устраняет
-//       зависание UI при переключении режима (enter/exit Learn session).
-//   [2] capture-loop: при read == 0 делает небольшой yield, чтобы
-//       не уходить в busy-loop в редких граничных случаях.
+// ВОЗВРАЩЕНО:
+//   [+] Программный playback boost (штатное усиление динамика):
+//       PCM-сэмплы умножаются на playbackBoost (1.0..2.0) с soft-clip
+//       перед записью в AudioTrack. По умолчанию 1.6 — динамик заметно
+//       громче без искажений речи. Меняется через setPlaybackBoost().
+//   [+] AGC, NS, AEC, jitter buffer (как раньше).
+//   [+] stopCapture: stop() → cancelAndJoin() → release() (быстрый выход).
 // ═══════════════════════════════════════════════════════════
 package com.translator.app.data
 
@@ -21,8 +22,6 @@ import android.media.audiofx.NoiseSuppressor
 import com.translator.app.domain.AudioEngine
 import com.translator.app.domain.model.SessionConfig
 import com.translator.app.util.AppLogger
-import javax.inject.Inject
-import javax.inject.Singleton
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
@@ -51,9 +50,17 @@ class AndroidAudioEngine(
     @Volatile private var jitterPreBufferChunks = 3
     @Volatile private var jitterTimeoutMs = 150L
 
-    @Volatile private var playbackGain: Float = 0.9f
-    @Volatile private var micGain: Float = 2.0f  // максимум для дистанции 40см
+    @Volatile private var playbackGain: Float = 1.0f
+    @Volatile private var micGain: Float = 2.0f         // максимум для дистанции 40см
     @Volatile private var forceSpeakerOutput: Boolean = true
+    @Volatile private var useAec: Boolean = true
+
+    /**
+     * Программное усиление воспроизведения (штатный boost динамика).
+     * 1.0 = без буста, 1.6 (по умолчанию) = +60% — заметно громче, без клиппинга речи,
+     * 2.0 = максимум, soft-clip защищает от искажений.
+     */
+    @Volatile private var playbackBoost: Float = 1.6f
 
     // ═══ FLOWS ═══
     private val _micOutput = MutableSharedFlow<ByteArray>(
@@ -113,6 +120,15 @@ class AndroidAudioEngine(
         forceSpeakerOutput = forceSpeaker
     }
 
+    override fun setPlaybackBoost(boost: Float) {
+        playbackBoost = boost.coerceIn(1.0f, 2.0f)
+        logger.d("Playback boost: ${"%.2f".format(playbackBoost)}x")
+    }
+
+    override fun setUseAec(enabled: Boolean) {
+        useAec = enabled
+    }
+
     // ════════════════════════════════════════════════════════════════════
     //  CAPTURE
     // ════════════════════════════════════════════════════════════════════
@@ -168,7 +184,7 @@ class AndroidAudioEngine(
             return
         }
 
-        if (AcousticEchoCanceler.isAvailable()) {
+        if (useAec && AcousticEchoCanceler.isAvailable()) {
             runCatching {
                 echoCanceler = AcousticEchoCanceler.create(recorder.audioSessionId)?.apply {
                     enabled = true
@@ -204,31 +220,25 @@ class AndroidAudioEngine(
             val rawBytes = byteBuffer.array()
 
             // ═══ Программный AGC ═══
-            // Нормализует пик до целевого уровня. Тихие фразы усиливаются,
-            // громкие — нет. Soft-clip защита от перегрузки.
-            // Настройки для съёма речи на расстоянии до 40см.
-            // Агрессивный boost тихих звуков, низкий noise floor.
-            var rollingPeak = 4000        // ниже стартовый уровень — быстрее догонит тихую речь
-            val targetPeak = 24000        // ~73% от Short.MAX, чуть ближе к пику
-            val agcAttack = 0.4f          // быстрее реакция на изменение громкости
-            val agcRelease = 0.015f       // ещё медленнее спад — стабильнее усиление
-            val agcMaxBoost = 8.0f        // ВДВОЕ больший boost для тихих фраз с 40см
+            var rollingPeak = 4000
+            val targetPeak = 24000
+            val agcAttack = 0.4f
+            val agcRelease = 0.015f
+            val agcMaxBoost = 8.0f
             val agcMinBoost = 0.6f
-            val noiseFloor = 300          // вдвое ниже порог — захватываем тихую речь
+            val noiseFloor = 300
 
             try {
                 while (isActive && isCapturing) {
                     val read = recorder.read(buffer, 0, buffer.size)
                     when {
                         read > 0 -> {
-                            // 1. Найти пик в чанке
                             var localPeak = 0
                             for (i in 0 until read) {
                                 val v = kotlin.math.abs(buffer[i].toInt())
                                 if (v > localPeak) localPeak = v
                             }
 
-                            // 2. Обновить rollingPeak (быстрая атака, медленный релиз)
                             rollingPeak = if (localPeak > rollingPeak) {
                                 (rollingPeak + (localPeak - rollingPeak) * agcAttack).toInt()
                             } else {
@@ -236,14 +246,10 @@ class AndroidAudioEngine(
                             }
                             if (rollingPeak < noiseFloor) rollingPeak = noiseFloor
 
-                            // 3. Расчёт коэффициента AGC
                             val agcGain = (targetPeak.toFloat() / rollingPeak.toFloat())
                                 .coerceIn(agcMinBoost, agcMaxBoost)
-
-                            // 4. Финальное усиление = AGC × ручной gain пользователя
                             val finalGain = agcGain * micGain
 
-                            // 5. Применить + soft-clip
                             for (i in 0 until read) {
                                 val amplified = (buffer[i] * finalGain).toInt()
                                 buffer[i] = when {
@@ -276,30 +282,23 @@ class AndroidAudioEngine(
 
     /**
      * Порядок: stop() → cancelAndJoin() → release().
-     * stop() будит блокирующий recorder.read() и возвращает ERROR_INVALID_OPERATION,
-     * что позволяет капчур-корутине увидеть cancel и выйти быстро (< 50мс).
+     * stop() будит блокирующий read() → exit < 50мс.
      */
     override suspend fun stopCapture() {
         if (!isCapturing && audioRecord == null) return
         isCapturing = false
 
-        // Snapshot — чтобы другие потоки не вырвали ссылку между строками
         val rec = audioRecord
         val aec = echoCanceler
+        val ns = noiseSuppressor
 
-        // 1. Будим блокирующий read() — после stop() он вернёт ERROR_INVALID_OPERATION,
-        //    и наш цикл увидит read < 0 → break.
         runCatching { rec?.stop() }
 
-        // 2. Теперь безопасно ждём выхода из цикла (быстро).
-        //    Таймаут 800мс на случай зависших устройств — не даёт блочить UI навечно.
         runCatching {
             withTimeoutOrNull(800L) { captureJob?.cancelAndJoin() }
         }
         captureJob = null
 
-        // 3. Освобождаем ресурсы на IO.
-        val ns = noiseSuppressor
         withContext(Dispatchers.IO) {
             runCatching { aec?.enabled = false }
             runCatching { aec?.release() }
@@ -314,7 +313,7 @@ class AndroidAudioEngine(
     }
 
     // ════════════════════════════════════════════════════════════════════
-    //  PLAYBACK
+    //  PLAYBACK (с программным бустом динамика)
     // ════════════════════════════════════════════════════════════════════
 
     override suspend fun initPlayback() {
@@ -360,7 +359,7 @@ class AndroidAudioEngine(
         runCatching { track.setVolume(playbackGain) }
         track.play()
         isPlaying = true
-        logger.d("Speaker ready (rate=$sampleRate)")
+        logger.d("Speaker ready (rate=$sampleRate, boost=${"%.2f".format(playbackBoost)}x)")
 
         playbackJob = engineScope.launch {
             try {
@@ -378,13 +377,15 @@ class AndroidAudioEngine(
                             catch (_: Exception) { return@repeat }
                         }
                         for (buffered in preBuffer) {
-                            _playbackSync.tryEmit(buffered)
-                            runCatching { track.write(buffered, 0, buffered.size) }
+                            val boosted = applyPlaybackBoost(buffered)
+                            _playbackSync.tryEmit(boosted)
+                            runCatching { track.write(boosted, 0, boosted.size) }
                         }
                         isFirstBatch = false
                     } else {
-                        _playbackSync.tryEmit(chunk)
-                        runCatching { track.write(chunk, 0, chunk.size) }
+                        val boosted = applyPlaybackBoost(chunk)
+                        _playbackSync.tryEmit(boosted)
+                        runCatching { track.write(boosted, 0, boosted.size) }
                     }
                     if (awaitingDrain && playbackChannel.isEmpty) {
                         awaitingDrain = false
@@ -399,10 +400,38 @@ class AndroidAudioEngine(
         }
     }
 
+    /**
+     * Программное усиление PCM 16-bit LE с soft-clip.
+     * Возвращает новый ByteArray, не модифицирует исходный.
+     * Если boost == 1.0 — возвращаем оригинал без копирования.
+     */
+    private fun applyPlaybackBoost(pcm: ByteArray): ByteArray {
+        val boost = playbackBoost
+        if (boost <= 1.001f || pcm.size < 2) return pcm
+
+        val out = pcm.copyOf()
+        var i = 0
+        val end = out.size - 1
+        while (i < end) {
+            val low = out[i].toInt() and 0xFF
+            val high = out[i + 1].toInt()
+            val sample = (high shl 8) or low
+            val signed = if (sample and 0x8000 != 0) sample or 0xFFFF0000.toInt() else sample
+            val amplified = (signed * boost).toInt()
+            val clipped = when {
+                amplified > Short.MAX_VALUE.toInt() -> Short.MAX_VALUE.toInt()
+                amplified < Short.MIN_VALUE.toInt() -> Short.MIN_VALUE.toInt()
+                else -> amplified
+            }
+            out[i] = (clipped and 0xFF).toByte()
+            out[i + 1] = ((clipped shr 8) and 0xFF).toByte()
+            i += 2
+        }
+        return out
+    }
+
     override suspend fun enqueuePlayback(pcmData: ByteArray) {
         if (pcmData.isEmpty()) return
-        // Сначала помещаем в канал, потом сбрасываем флаг —
-        // чтобы playback loop не успел обработать chunk до того как мы убрали awaitingDrain
         val result = playbackChannel.trySend(pcmData)
         if (result.isFailure) {
             playbackChannel.tryReceive()
