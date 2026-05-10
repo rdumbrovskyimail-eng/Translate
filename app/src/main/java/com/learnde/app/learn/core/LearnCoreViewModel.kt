@@ -113,6 +113,8 @@ class LearnCoreViewModel @Inject constructor(
 
     private var stuckTurnWatchdogJob: Job? = null
     private var textWithoutAudioJob: Job? = null
+    private var nativeSpeechJob: Job? = null
+    @Volatile private var nativeSpeechPartialBuffer: String = ""
 
     @Volatile private var lastInputTs: Long = 0L
     @Volatile private var modelStartedSpeakingThisTurn = false
@@ -441,7 +443,48 @@ class LearnCoreViewModel @Inject constructor(
         return if (hasCyrillic) "RU" else "DE"
     }
 
-
+    /**
+     * Подписка на события системного SpeechRecognizer.
+     * Партиалы → драфт пользователя в UI пары.
+     * Финал → закрепляем originalText + триггерим финализацию пары.
+     */
+    private fun startNativeSpeechObserver() {
+        nativeSpeechJob?.cancel()
+        nativeSpeechJob = viewModelScope.launch {
+            nativeSpeech.events.collect { ev ->
+                if (activeSession?.id != "translator") return@collect
+                when (ev) {
+                    is com.learnde.app.data.translator.NativeSpeechTranscriber.TranscriptEvent.Partial -> {
+                        val pairId = currentOpenPairId ?: openNewPair()
+                        updatePair(pairId) { pair ->
+                            pair.copy(
+                                originalText = ev.text,
+                                originalLang = ev.lang,
+                                originalIsFinal = false,
+                                originalIsRefined = false,
+                            )
+                        }
+                    }
+                    is com.learnde.app.data.translator.NativeSpeechTranscriber.TranscriptEvent.Final -> {
+                        val pairId = currentOpenPairId ?: openNewPair()
+                        updatePair(pairId) { pair ->
+                            pair.copy(
+                                originalText = ev.text,
+                                originalLang = ev.lang,
+                                originalIsFinal = true,
+                                originalIsRefined = true, // ✓✓ — финал от системного ASR качественный
+                            )
+                        }
+                        logger.d("NativeSpeech finalized pair $pairId: [${ev.lang}] ${ev.text}")
+                    }
+                    is com.learnde.app.data.translator.NativeSpeechTranscriber.TranscriptEvent.Error -> {
+                        // Ошибки логируются внутри транскриптора, в UI не выносим
+                    }
+                    else -> { /* ReadyForSpeech / EndOfSpeech — без UI реакции */ }
+                }
+            }
+        }
+    }
 
     private fun observeVocabularyViolations() {
         viewModelScope.launch {
@@ -597,6 +640,9 @@ class LearnCoreViewModel @Inject constructor(
 
         runCatching { liveClient.disconnect() }
         runCatching { session?.onExit() }
+        runCatching { nativeSpeech.stop() }
+        nativeSpeechJob?.cancel()
+        nativeSpeechJob = null
 
         transcriptChannel.trySend(TranscriptOp.UserTurnComplete)
         transcriptChannel.trySend(TranscriptOp.ModelTurnComplete)
