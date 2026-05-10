@@ -3,6 +3,7 @@ package com.translator.app.data
 import android.util.Base64
 import com.translator.app.domain.LiveClient
 import com.translator.app.domain.ToolResponse
+import com.translator.app.domain.model.AudioChunk
 import com.translator.app.domain.model.ConversationMessage
 import com.translator.app.domain.model.FunctionCall
 import com.translator.app.domain.model.GeminiEvent
@@ -490,12 +491,21 @@ class GeminiLiveClient(
     //  CLIENT → SERVER
     // ════════════════════════════════════════════════════════════
 
-    override fun sendAudio(pcmData: ByteArray) {
-        if (!isReady) return
-        val b64 = Base64.encodeToString(pcmData, Base64.NO_WRAP)
-        val raw = """{"realtimeInput":{"audio":{"data":"$b64","mimeType":"audio/pcm;rate=${SessionConfig.INPUT_SAMPLE_RATE}"}}}"""
-        trackSentFrame(raw)
-        webSocket?.send(raw)
+    override fun sendAudio(chunk: AudioChunk) {
+        if (!isReady) {
+            chunk.release()
+            return
+        }
+        try {
+            val b64 = Base64.encodeToString(chunk.data, 0, chunk.length, Base64.NO_WRAP)
+            val raw = """{"realtimeInput":{"audio":{"data":"$b64","mimeType":"audio/pcm;rate=${SessionConfig.INPUT_SAMPLE_RATE}"}}}"""
+            trackSentFrame(raw)
+            webSocket?.send(raw)
+        } catch (e: Exception) {
+            logger.e("Audio send failed: ${e.message}")
+        } finally {
+            chunk.release()
+        }
     }
 
     override fun sendText(text: String) {
