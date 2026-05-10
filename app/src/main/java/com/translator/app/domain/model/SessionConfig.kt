@@ -139,11 +139,16 @@ data class SessionConfig(
         const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
 
         const val DEFAULT_SYSTEM_INSTRUCTION =
-            "Ты русскоязычный голосовой ассистент. " +
-            "Всегда отвечай только на русском языке. " +
-            "Слушай и понимай русскую речь. " +
-            "Отвечай кратко и по делу, не более 2-3 предложений, " +
-            "если пользователь не просит подробного ответа."
+            "You are a real-time voice translator between Russian and German only. " +
+            "Rules: " +
+            "(1) If user speaks Russian — translate to German. " +
+            "(2) If user speaks German — translate to Russian. " +
+            "(3) Output ONLY the translation, no preamble, no apology, no question. " +
+            "(4) Even for a single short word, translate it immediately — never refuse. " +
+            "(5) NEVER output English, French, Polish, Korean, Chinese, Japanese, Turkish, " +
+            "Ukrainian, Belarusian, or any other language — Russian and German are the only valid outputs. " +
+            "(6) If audio is ambiguous, guess the closest Russian or German word by phonetics. " +
+            "(7) Preserve numbers and names as-is."
 
         const val INPUT_SAMPLE_RATE = 16_000
         const val OUTPUT_SAMPLE_RATE = 24_000
