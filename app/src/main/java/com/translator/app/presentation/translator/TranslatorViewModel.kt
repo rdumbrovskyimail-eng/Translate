@@ -122,12 +122,20 @@ class TranslatorViewModel @Inject constructor(
                         startStuckTurnWatchdog()
                     }
                     is GeminiEvent.InputTranscript -> {
+                        // Точная логика из LearnCoreViewModel: incremental deltas
                         val pairId = currentOpenPairId ?: openNewPair()
-                        updatePair(pairId) { it.copy(originalText = it.originalText + event.text, originalLang = detectLang(it.originalText + event.text)) }
+                        updatePair(pairId) { 
+                            val newText = it.originalText + event.text
+                            it.copy(originalText = newText, originalLang = detectLang(newText)) 
+                        }
                     }
                     is GeminiEvent.OutputTranscript -> {
+                        // Точная логика из LearnCoreViewModel: incremental deltas
                         val pairId = currentOpenPairId ?: openNewPair()
-                        updatePair(pairId) { it.copy(translationText = it.translationText + event.text, translationLang = detectLang(it.translationText + event.text)) }
+                        updatePair(pairId) { 
+                            val newText = it.translationText + event.text
+                            it.copy(translationText = newText, translationLang = detectLang(newText)) 
+                        }
                         hasModelOutputThisTurn = true
                         startStuckTurnWatchdog()
                     }
@@ -141,6 +149,13 @@ class TranslatorViewModel @Inject constructor(
                             updatePair(pairId) { it.copy(originalIsFinal = true, translationIsFinal = true, originalIsRefined = true, translationIsRefined = true) }
                         }
                         currentOpenPairId = null
+                    }
+                    is GeminiEvent.GenerationComplete -> {
+                        _state.update { it.copy(isAiSpeaking = false) }
+                        stuckTurnWatchdogJob?.cancel()
+                        currentOpenPairId?.let { pairId ->
+                            updatePair(pairId) { it.copy(translationIsFinal = true) }
+                        }
                     }
                     is GeminiEvent.Disconnected, is GeminiEvent.ConnectionError -> {
                         _state.update { it.copy(connectionStatus = ConnectionStatus.Disconnected, isMicActive = false, isAiSpeaking = false) }
