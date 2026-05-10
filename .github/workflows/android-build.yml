@@ -37,11 +37,14 @@ jobs:
       - name: Restore debug keystore
         run: |
           mkdir -p ~/.android
-          echo "${{ secrets.DEBUG_KEYSTORE_B64 }}" | base64 -d > ~/.android/debug.keystore
+          echo "${{ secrets.DEBUG_KEYSTORE_B64_TRANSLATE }}" | base64 -d > ~/.android/debug.keystore
+
+      - name: Make gradlew executable
+        run: chmod +x ./gradlew
 
       - name: Build Debug APK
         run: |
-          gradle assembleDebug \
+          ./gradlew assembleDebug \
             --parallel \
             --max-workers=4 \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:MaxMetaspaceSize=512m" \
@@ -65,10 +68,10 @@ jobs:
           body: |
             **Commit:** `${{ github.event.head_commit.message }}`
             **SHA:** `${{ github.sha }}`
-            
+
             🚀 **Ультра-легкая версия (работает через Cloud Gemini Live)**
             **Размер APK:** ${{ steps.pack.outputs.apk_mb }} MB
-            
+
             **Установка:** скачайте файл `.apk` ниже и установите на телефон (распаковывать ничего не нужно!).
           files: |
             app/build/outputs/apk/debug/app-debug.apk
