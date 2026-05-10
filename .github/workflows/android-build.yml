@@ -39,25 +39,9 @@ jobs:
           mkdir -p ~/.android
           echo "${{ secrets.DEBUG_KEYSTORE_B64_TRANSLATE }}" | base64 -d > ~/.android/debug.keystore
 
-      - name: Restore Gradle Wrapper JAR
-        run: |
-          if [ ! -f gradle/wrapper/gradle-wrapper.jar ]; then
-            GRADLE_VERSION=$(grep distributionUrl gradle/wrapper/gradle-wrapper.properties \
-              | sed 's/.*gradle-\(.*\)-bin\.zip.*/\1/')
-            echo "Downloading gradle-wrapper.jar for Gradle $GRADLE_VERSION"
-            curl -fL "https://services.gradle.org/distributions/gradle-${GRADLE_VERSION}-bin.zip" \
-              -o /tmp/gradle.zip
-            unzip -q /tmp/gradle.zip -d /tmp/gradle-dist
-            cp /tmp/gradle-dist/gradle-${GRADLE_VERSION}/lib/gradle-launcher-*.jar \
-              gradle/wrapper/gradle-wrapper.jar
-          fi
-
-      - name: Make gradlew executable
-        run: chmod +x ./gradlew
-
       - name: Build Debug APK
         run: |
-          ./gradlew assembleDebug \
+          gradle assembleDebug \
             --parallel \
             --max-workers=4 \
             -Dorg.gradle.jvmargs="-Xmx4g -XX:+UseG1GC -XX:MaxMetaspaceSize=512m" \
@@ -81,10 +65,10 @@ jobs:
           body: |
             **Commit:** `${{ github.event.head_commit.message }}`
             **SHA:** `${{ github.sha }}`
-
+            
             🚀 **Ультра-легкая версия (работает через Cloud Gemini Live)**
             **Размер APK:** ${{ steps.pack.outputs.apk_mb }} MB
-
+            
             **Установка:** скачайте файл `.apk` ниже и установите на телефон (распаковывать ничего не нужно!).
           files: |
             app/build/outputs/apk/debug/app-debug.apk
