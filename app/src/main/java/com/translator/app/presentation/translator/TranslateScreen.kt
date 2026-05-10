@@ -74,11 +74,30 @@ fun TranslateScreen(
     val isActive = state.connectionStatus != ConnectionStatus.Disconnected
 
     val micLauncher = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { granted ->
-        if (granted) viewModel.startSession()
+        if (granted) {
+            // permission получен — стартуем сессию (или, если уже подключены, мик)
+            if (state.connectionStatus == ConnectionStatus.Disconnected) {
+                viewModel.startSession()
+            } else {
+                viewModel.onMicPermissionGranted()
+            }
+        }
     }
 
+    // КРИТИЧНО: запрашиваем permission ДО startSession.
+    // Если запустить сессию без RECORD_AUDIO, AudioRecord падает с UOE
+    // на первой же попытке startCapture.
     LaunchedEffect(Unit) {
-        if (!isActive) viewModel.startSession()
+        if (!isActive) {
+            if (ContextCompat.checkSelfPermission(
+                    context, Manifest.permission.RECORD_AUDIO
+                ) == PackageManager.PERMISSION_GRANTED
+            ) {
+                viewModel.startSession()
+            } else {
+                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
+            }
+        }
     }
 
     androidx.activity.compose.BackHandler {
