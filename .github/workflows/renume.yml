@@ -1,0 +1,54 @@
+name: Rename Package to Translate
+
+on:
+  workflow_dispatch: # Позволяет запустить скрипт вручную по кнопке
+
+jobs:
+  rename:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Replace text in files
+        run: |
+          # Ищем все файлы с кодом, манифесты и скрипты сборки
+          # и меняем com.learnde на com.translate
+          find . -type f \( -name "*.kt" -o -name "*.xml" -o -name "*.kts" -o -name "*.pro" \) -exec sed -i 's/com\.learnde/com.translate/g' {} +
+
+      - name: Move directories
+        run: |
+          # Перемещаем основную папку с кодом
+          if [ -d "app/src/main/java/com/learnde" ]; then
+            mkdir -p app/src/main/java/com/translate
+            mv app/src/main/java/com/learnde/* app/src/main/java/com/translate/
+            rm -rf app/src/main/java/com/learnde
+          fi
+          
+          # Перемещаем папку с Android-тестами (если она есть)
+          if[ -d "app/src/androidTest/java/com/learnde" ]; then
+            mkdir -p app/src/androidTest/java/com/translate
+            mv app/src/androidTest/java/com/learnde/* app/src/androidTest/java/com/translate/
+            rm -rf app/src/androidTest/java/com/learnde
+          fi
+          
+          # Перемещаем папку с Unit-тестами (если она есть)
+          if[ -d "app/src/test/java/com/learnde" ]; then
+            mkdir -p app/src/test/java/com/translate
+            mv app/src/test/java/com/learnde/* app/src/test/java/com/translate/
+            rm -rf app/src/test/java/com/learnde
+          fi
+
+      - name: Commit and Push changes
+        run: |
+          git config --global user.name "GitHub Actions Bot"
+          git config --global user.email "actions@github.com"
+          git add .
+          
+          # Проверяем, есть ли изменения, и пушим их
+          if ! git diff-index --quiet HEAD; then
+            git commit -m "Refactor: changed package from learnde to translate"
+            git push
+          else
+            echo "Изменений не найдено. Возможно, пакет уже переименован."
+          fi
