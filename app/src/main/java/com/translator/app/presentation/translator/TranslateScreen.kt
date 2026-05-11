@@ -22,7 +22,7 @@ import android.content.pm.PackageManager
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedContent
-import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.AnimatedVisibility as AnimatedVisibilityCore
 import androidx.compose.animation.animateColorAsState
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.Spring
@@ -490,7 +490,7 @@ private fun BottomControlPanel(
             modifier = Modifier.fillMaxWidth().height(140.dp),
             contentAlignment = Alignment.Center
         ) {
-            AnimatedVisibility(
+            AnimatedVisibilityCore(
                 visible = isActive,
                 enter = fadeIn() + scaleIn(initialScale = 0.92f),
                 exit = fadeOut() + scaleOut(targetScale = 0.92f)
