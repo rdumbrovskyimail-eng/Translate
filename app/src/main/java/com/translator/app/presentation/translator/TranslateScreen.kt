@@ -1,19 +1,23 @@
 // ═══════════════════════════════════════════════════════════
-// ПОЛНАЯ ЗАМЕНА
+// ПОЛНАЯ ЗАМЕНА (v3.0)
 // Путь: app/src/main/java/com/translator/app/presentation/translator/TranslateScreen.kt
 //
-// Премиальный экран переводчика с поддержкой 4 тем.
+// Премиальный экран переводчика с поддержкой 6 тем и 5 стилей появления.
 //
-// ОСОБЕННОСТИ:
-//   • Все цвета — через LocalAppPalette.current (никаких хардкодов)
-//   • Все строки — через stringResource (ru / de)
-//   • Воices animation выбирается по themeId:
-//       - AURORA      → AuroraAura (прямоугольная булька-градиент)
-//       - BERLIN_MIST → BerlinWaveform (горизонтальный bar-graph)
-//       - SAKURA      → SakuraRipples (расходящиеся кольца)
-//       - OBSIDIAN    → ObsidianOrb (3D-сфера с орбитой)
-//   • Минималистичная карточка перевода: флаг + текст + статус-точка
-//   • Микрофонная кнопка с тонким наружным "halo" в активном состоянии
+// КЛЮЧЕВЫЕ ФИЧИ:
+//   • Все цвета — через LocalAppPalette.current (livinginterpolated)
+//   • 6 voice animations:
+//       - AURORA       → AuroraAura
+//       - BERLIN_MIST  → BerlinWaveform
+//       - SAKURA       → SakuraRipples
+//       - OBSIDIAN     → ObsidianOrb
+//       - OPEN_OASIS   → GptFluidVoice    ★ NEW
+//       - GEMINI_NEXUS → GeminiMeshAura   ★ NEW
+//   • 5 стилей появления карточек через MessageReveal
+//       (INSTANT / SOFT_FADE / SPRING_SLIDE / LIQUID_MORPH / TYPEWRITER)
+//   • Премиум-карточка перевода с typewriter-совместимым текстом
+//   • Микрофонная кнопка с реактивным halo и spring scale
+//   • Smooth crossfade между animations при смене темы
 // ═══════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator
 
@@ -35,6 +39,7 @@ import androidx.compose.animation.fadeIn
 import androidx.compose.animation.fadeOut
 import androidx.compose.animation.scaleIn
 import androidx.compose.animation.scaleOut
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
@@ -69,10 +74,10 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
-import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.blur
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.draw.shadow
@@ -93,8 +98,12 @@ import com.translator.app.presentation.theme.AppThemeId
 import com.translator.app.presentation.theme.LocalAppPalette
 import com.translator.app.presentation.translator.animations.AuroraAura
 import com.translator.app.presentation.translator.animations.BerlinWaveform
+import com.translator.app.presentation.translator.animations.GeminiMeshAura
+import com.translator.app.presentation.translator.animations.GptFluidVoice
 import com.translator.app.presentation.translator.animations.ObsidianOrb
 import com.translator.app.presentation.translator.animations.SakuraRipples
+import com.translator.app.presentation.translator.reveal.MessageReveal
+import com.translator.app.presentation.translator.reveal.typewriterText
 import kotlinx.coroutines.flow.Flow
 
 @Composable
@@ -114,11 +123,8 @@ fun TranslateScreen(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
         if (granted) {
-            if (state.connectionStatus == ConnectionStatus.Disconnected) {
-                viewModel.startSession()
-            } else {
-                viewModel.onMicPermissionGranted()
-            }
+            if (state.connectionStatus == ConnectionStatus.Disconnected) viewModel.startSession()
+            else viewModel.onMicPermissionGranted()
         }
     }
 
@@ -127,17 +133,13 @@ fun TranslateScreen(
             if (ContextCompat.checkSelfPermission(
                     context, Manifest.permission.RECORD_AUDIO
                 ) == PackageManager.PERMISSION_GRANTED
-            ) {
-                viewModel.startSession()
-            } else {
-                micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-            }
+            ) viewModel.startSession()
+            else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
         }
     }
 
     androidx.activity.compose.BackHandler {
-        viewModel.stopSession()
-        onBack()
+        viewModel.stopSession(); onBack()
     }
 
     Box(modifier = Modifier.fillMaxSize().background(palette.background)) {
@@ -154,11 +156,8 @@ fun TranslateScreen(
             )
 
             Box(modifier = Modifier.fillMaxWidth().weight(1f)) {
-                if (state.pairs.isEmpty()) {
-                    EmptyState(palette = palette, isActive = isActive)
-                } else {
-                    PairsList(palette = palette, pairs = state.pairs)
-                }
+                if (state.pairs.isEmpty()) EmptyState(palette = palette, isActive = isActive)
+                else PairsList(palette = palette, pairs = state.pairs)
             }
 
             BottomControlPanel(
@@ -171,11 +170,8 @@ fun TranslateScreen(
                     if (ContextCompat.checkSelfPermission(
                             context, Manifest.permission.RECORD_AUDIO
                         ) == PackageManager.PERMISSION_GRANTED
-                    ) {
-                        viewModel.toggleMic()
-                    } else {
-                        micLauncher.launch(Manifest.permission.RECORD_AUDIO)
-                    }
+                    ) viewModel.toggleMic()
+                    else micLauncher.launch(Manifest.permission.RECORD_AUDIO)
                 }
             )
         }
@@ -212,25 +208,22 @@ private fun TopBar(
         Column(modifier = Modifier.weight(1f)) {
             Text(
                 text = stringResource(R.string.translator_title),
-                fontSize = 20.sp,
-                fontWeight = FontWeight.W600,
-                color = palette.textPrimary
+                fontSize = 20.sp, fontWeight = FontWeight.W700,
+                color = palette.textPrimary, letterSpacing = (-0.3).sp
             )
             val statusRes = when {
                 connectionStatus == ConnectionStatus.Reconnecting -> R.string.status_reconnecting
-                connectionStatus == ConnectionStatus.Connecting -> R.string.status_connecting
+                connectionStatus == ConnectionStatus.Connecting   -> R.string.status_connecting
                 isActive && isAiSpeaking -> R.string.status_ai_speaking
-                isActive && isMicActive -> R.string.status_listening
-                isActive -> R.string.status_ready
-                else -> R.string.status_disconnected
+                isActive && isMicActive  -> R.string.status_listening
+                isActive                 -> R.string.status_ready
+                else                     -> R.string.status_disconnected
             }
             val statusText = stringResource(statusRes)
             AnimatedContent(targetState = statusText, label = "statusText") { text ->
                 Text(
-                    text = text,
-                    fontSize = 13.sp,
-                    color = palette.textSecondary,
-                    fontWeight = FontWeight.Medium
+                    text = text, fontSize = 13.sp,
+                    color = palette.textSecondary, fontWeight = FontWeight.Medium
                 )
             }
         }
@@ -263,7 +256,6 @@ private fun EmptyState(palette: AppPalette, isActive: Boolean) {
             modifier = Modifier.fillMaxWidth().padding(horizontal = 36.dp),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
-            // Языковая капсула — флагообразные значки RU ⇄ DE
             Row(
                 modifier = Modifier
                     .clip(RoundedCornerShape(24.dp))
@@ -273,41 +265,26 @@ private fun EmptyState(palette: AppPalette, isActive: Boolean) {
                 verticalAlignment = Alignment.CenterVertically,
                 horizontalArrangement = Arrangement.spacedBy(12.dp)
             ) {
-                Text(
-                    text = "RU",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.textPrimary
-                )
-                Text(
-                    text = "⇄",
-                    fontSize = 14.sp,
-                    color = palette.accentPrimary,
-                    fontWeight = FontWeight.Bold
-                )
-                Text(
-                    text = "DE",
-                    fontSize = 14.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    color = palette.textPrimary
-                )
+                Text("RU", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = palette.textPrimary)
+                Text("⇄", fontSize = 14.sp, color = palette.accentPrimary,
+                    fontWeight = FontWeight.Bold)
+                Text("DE", fontSize = 14.sp, fontWeight = FontWeight.SemiBold,
+                    color = palette.textPrimary)
             }
-
             Text(
                 text = stringResource(
                     if (isActive) R.string.hint_active_title else R.string.hint_idle_title
                 ),
-                fontSize = 22.sp,
-                fontWeight = FontWeight.W600,
-                color = palette.textPrimary,
-                textAlign = TextAlign.Center
+                fontSize = 22.sp, fontWeight = FontWeight.W700,
+                color = palette.textPrimary, textAlign = TextAlign.Center,
+                letterSpacing = (-0.3).sp
             )
             Text(
                 text = stringResource(
                     if (isActive) R.string.hint_active_subtitle else R.string.hint_idle_subtitle
                 ),
-                fontSize = 15.sp,
-                color = palette.textSecondary,
+                fontSize = 15.sp, color = palette.textSecondary,
                 textAlign = TextAlign.Center
             )
         }
@@ -315,7 +292,7 @@ private fun EmptyState(palette: AppPalette, isActive: Boolean) {
 }
 
 // ════════════════════════════════════════════════════════════
-//  PAIRS LIST + CARD
+//  PAIRS LIST + CARD (с MessageReveal)
 // ════════════════════════════════════════════════════════════
 
 @Composable
@@ -337,7 +314,12 @@ private fun PairsList(palette: AppPalette, pairs: List<TranslationPair>) {
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 20.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        items(pairs, key = { it.id }) { pair -> PairCard(palette, pair) }
+        items(pairs, key = { it.id }) { pair ->
+            // MessageReveal оборачивает каждую карточку в выбранный стиль
+            MessageReveal(itemKey = pair.id) {
+                PairCard(palette, pair)
+            }
+        }
     }
 }
 
@@ -348,10 +330,18 @@ private fun PairCard(palette: AppPalette, pair: TranslationPair) {
     Column(
         modifier = Modifier
             .fillMaxWidth()
-            .shadow(elevation = if (palette.isDark) 0.dp else 6.dp, RoundedCornerShape(22.dp), spotColor = shadowSpot)
-            .clip(RoundedCornerShape(22.dp))
+            .shadow(
+                elevation = if (palette.isDark) 0.dp else 8.dp,
+                shape = RoundedCornerShape(24.dp),
+                spotColor = shadowSpot
+            )
+            .clip(RoundedCornerShape(24.dp))
             .background(palette.surfaceElevated)
-            .then(if (palette.isDark) Modifier.border(1.dp, palette.border, RoundedCornerShape(22.dp)) else Modifier)
+            .then(
+                if (palette.isDark)
+                    Modifier.border(1.dp, palette.border, RoundedCornerShape(24.dp))
+                else Modifier
+            )
             .padding(18.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
@@ -363,7 +353,14 @@ private fun PairCard(palette: AppPalette, pair: TranslationPair) {
             isFinal = pair.originalIsFinal,
             isRefined = pair.originalIsRefined
         )
-        Box(modifier = Modifier.fillMaxWidth().height(1.dp).background(palette.divider))
+        Box(
+            modifier = Modifier.fillMaxWidth().height(1.dp)
+                .background(
+                    Brush.horizontalGradient(
+                        listOf(Color.Transparent, palette.divider, palette.divider, Color.Transparent)
+                    )
+                )
+        )
         TranscriptBlock(
             palette = palette,
             text = pair.translationText,
@@ -384,7 +381,7 @@ private fun TranscriptBlock(
     isFinal: Boolean,
     isRefined: Boolean
 ) {
-    Column(modifier = Modifier.animateContentSize()) {
+    Column(modifier = Modifier.animateContentSize(spring(stiffness = Spring.StiffnessMediumLow))) {
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
@@ -392,20 +389,14 @@ private fun TranscriptBlock(
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Box(
-                    modifier = Modifier
-                        .size(6.dp)
-                        .clip(CircleShape)
+                    modifier = Modifier.size(6.dp).clip(CircleShape)
                         .background(if (isOriginal) palette.textMuted else palette.accentPrimary)
                 )
                 Spacer(Modifier.width(8.dp))
                 Text(
-                    text = lang.ifBlank {
-                        if (isOriginal) "—" else "—"
-                    }.uppercase(),
-                    fontSize = 11.sp,
-                    fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 1.2.sp,
-                    color = palette.textSecondary
+                    text = lang.ifBlank { "—" }.uppercase(),
+                    fontSize = 11.sp, fontWeight = FontWeight.W700,
+                    letterSpacing = 1.5.sp, color = palette.textSecondary
                 )
             }
             StatusDot(palette = palette, isFinal = isFinal, isRefined = isRefined)
@@ -414,8 +405,11 @@ private fun TranscriptBlock(
         if (text.isBlank() && !isFinal) {
             ShimmerPlaceholder(palette = palette)
         } else {
+            // typewriterText: если активен Typewriter reveal — текст постепенно раскрывается.
+            // Для остальных стилей возвращает строку как есть.
+            val displayed = typewriterText(text)
             Text(
-                text = text,
+                text = displayed,
                 fontSize = if (isOriginal) 15.sp else 18.sp,
                 lineHeight = if (isOriginal) 22.sp else 26.sp,
                 color = if (isOriginal) palette.textSecondary else palette.textPrimary,
@@ -427,12 +421,10 @@ private fun TranscriptBlock(
 
 @Composable
 private fun StatusDot(palette: AppPalette, isFinal: Boolean, isRefined: Boolean) {
-    // Минималистичный индикатор: 1 точка серая (черновик), 2 точки в цвете (final),
-    // 2 точки в цвете success (refined).
     val color = when {
         isRefined -> palette.statusOk
-        isFinal -> palette.textMuted
-        else -> palette.textMuted.copy(alpha = 0.5f)
+        isFinal   -> palette.textMuted
+        else      -> palette.textMuted.copy(alpha = 0.5f)
     }
     Row(horizontalArrangement = Arrangement.spacedBy(3.dp)) {
         Box(Modifier.size(4.dp).clip(CircleShape).background(color))
@@ -446,29 +438,22 @@ private fun StatusDot(palette: AppPalette, isFinal: Boolean, isRefined: Boolean)
 private fun ShimmerPlaceholder(palette: AppPalette) {
     val transition = rememberInfiniteTransition(label = "shimmer")
     val alpha by transition.animateFloat(
-        initialValue = 0.25f,
-        targetValue = 0.55f,
+        initialValue = 0.25f, targetValue = 0.55f,
         animationSpec = infiniteRepeatable(tween(900), RepeatMode.Reverse),
         label = "shimmerAlpha"
     )
     Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-        Box(
-            modifier = Modifier
-                .height(14.dp).fillMaxWidth(0.75f)
-                .clip(RoundedCornerShape(4.dp))
-                .background(palette.border.copy(alpha = alpha))
-        )
-        Box(
-            modifier = Modifier
-                .height(14.dp).fillMaxWidth(0.5f)
-                .clip(RoundedCornerShape(4.dp))
-                .background(palette.border.copy(alpha = alpha))
-        )
+        Box(modifier = Modifier.height(14.dp).fillMaxWidth(0.75f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(palette.border.copy(alpha = alpha)))
+        Box(modifier = Modifier.height(14.dp).fillMaxWidth(0.5f)
+            .clip(RoundedCornerShape(4.dp))
+            .background(palette.border.copy(alpha = alpha)))
     }
 }
 
 // ════════════════════════════════════════════════════════════
-//  BOTTOM PANEL — voice anim + mic button
+//  BOTTOM PANEL — voice animation + mic button
 // ════════════════════════════════════════════════════════════
 
 @Composable
@@ -486,35 +471,31 @@ private fun BottomControlPanel(
     ) {
         // Слот анимации — фиксированной высоты, чтобы layout не дёргался.
         Box(
-            modifier = Modifier.fillMaxWidth().height(140.dp),
+            modifier = Modifier.fillMaxWidth().height(150.dp),
             contentAlignment = Alignment.Center
         ) {
             androidx.compose.animation.AnimatedVisibility(
                 visible = isActive,
-                enter = fadeIn() + scaleIn(initialScale = 0.92f),
-                exit = fadeOut() + scaleOut(targetScale = 0.92f)
+                enter = fadeIn(tween(220)) + scaleIn(initialScale = 0.92f, animationSpec = tween(280)),
+                exit = fadeOut(tween(180)) + scaleOut(targetScale = 0.92f, animationSpec = tween(220))
             ) {
-                when (palette.id) {
-                    AppThemeId.AURORA -> AuroraAura(
-                        palette = palette,
-                        audioFlow = audioFlow,
-                        isAiSpeaking = isAiSpeaking || isMicActive
-                    )
-                    AppThemeId.BERLIN_MIST -> BerlinWaveform(
-                        palette = palette,
-                        audioFlow = audioFlow,
-                        isAiSpeaking = isAiSpeaking || isMicActive
-                    )
-                    AppThemeId.SAKURA -> SakuraRipples(
-                        palette = palette,
-                        audioFlow = audioFlow,
-                        isAiSpeaking = isAiSpeaking || isMicActive
-                    )
-                    AppThemeId.OBSIDIAN -> ObsidianOrb(
-                        palette = palette,
-                        audioFlow = audioFlow,
-                        isAiSpeaking = isAiSpeaking || isMicActive
-                    )
+                // AnimatedContent крутит мягкий кроссфейд при смене темы
+                AnimatedContent(
+                    targetState = palette.id,
+                    transitionSpec = {
+                        (fadeIn(tween(280)) + scaleIn(initialScale = 0.95f, animationSpec = tween(280))) togetherWith
+                                (fadeOut(tween(200)) + scaleOut(targetScale = 0.95f, animationSpec = tween(200)))
+                    },
+                    label = "animByTheme"
+                ) { themeId ->
+                    when (themeId) {
+                        AppThemeId.AURORA       -> AuroraAura(palette, audioFlow, isAiSpeaking || isMicActive)
+                        AppThemeId.BERLIN_MIST  -> BerlinWaveform(palette, audioFlow, isAiSpeaking || isMicActive)
+                        AppThemeId.SAKURA       -> SakuraRipples(palette, audioFlow, isAiSpeaking || isMicActive)
+                        AppThemeId.OBSIDIAN     -> ObsidianOrb(palette, audioFlow, isAiSpeaking || isMicActive)
+                        AppThemeId.OPEN_OASIS   -> GptFluidVoice(palette, audioFlow, isAiSpeaking || isMicActive)
+                        AppThemeId.GEMINI_NEXUS -> GeminiMeshAura(palette, audioFlow, isAiSpeaking || isMicActive)
+                    }
                 }
             }
         }
@@ -526,40 +507,54 @@ private fun BottomControlPanel(
 @Composable
 private fun MicButton(palette: AppPalette, isActive: Boolean, onClick: () -> Unit) {
     val haloAlpha by animateFloatAsState(
-        targetValue = if (isActive) 0.35f else 0f,
+        targetValue = if (isActive) 0.36f else 0f,
         animationSpec = tween(durationMillis = 250),
         label = "halo"
     )
     val color by animateColorAsState(
         targetValue = if (isActive) palette.statusRecording else palette.accentPrimary,
-        animationSpec = tween(durationMillis = 200),
+        animationSpec = tween(durationMillis = 220),
         label = "micColor"
     )
     val scale by animateFloatAsState(
-        targetValue = if (isActive) 1.04f else 1f,
+        targetValue = if (isActive) 1.06f else 1f,
         animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
         label = "micScale"
     )
+    val haloScale by animateFloatAsState(
+        targetValue = if (isActive) 1.18f else 1f,
+        animationSpec = spring(dampingRatio = 0.55f, stiffness = Spring.StiffnessMedium),
+        label = "haloScale"
+    )
 
     Box(
-        modifier = Modifier.size(88.dp),
+        modifier = Modifier.size(96.dp),
         contentAlignment = Alignment.Center
     ) {
-        // Тонкое halo вокруг кнопки в активном состоянии
+        // Soft blurred halo behind the button (premium effect)
         Box(
             modifier = Modifier
-                .size(88.dp)
+                .size(92.dp)
+                .scale(haloScale)
                 .clip(CircleShape)
+                .blur(radius = 14.dp)
                 .background(color.copy(alpha = haloAlpha))
+        )
+        // Solid halo ring (visible without blur for accent)
+        Box(
+            modifier = Modifier
+                .size(92.dp)
+                .clip(CircleShape)
+                .background(color.copy(alpha = haloAlpha * 0.5f))
         )
         Box(
             modifier = Modifier
                 .size(72.dp)
                 .scale(scale)
                 .shadow(
-                    elevation = if (isActive) 14.dp else 6.dp,
+                    elevation = if (isActive) 16.dp else 6.dp,
                     shape = CircleShape,
-                    spotColor = color.copy(alpha = 0.5f)
+                    spotColor = color.copy(alpha = 0.6f)
                 )
                 .clip(CircleShape)
                 .background(
