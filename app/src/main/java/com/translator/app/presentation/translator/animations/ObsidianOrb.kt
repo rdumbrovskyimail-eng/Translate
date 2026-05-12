@@ -1,19 +1,15 @@
 // ═══════════════════════════════════════════════════════════
-// НОВЫЙ ФАЙЛ
+// ПОЛНАЯ ЗАМЕНА (v2.0 — Deep Orb)
 // Путь: app/src/main/java/com/translator/app/presentation/translator/animations/ObsidianOrb.kt
 //
-// АНИМАЦИЯ ДЛЯ "OBSIDIAN" — премиальная "wow"-сфера для тёмной темы.
+// Глянцевая 3D-сфера для тёмной темы. Многослойные радиальные градиенты
+// дают полную иллюзию объёма. Вокруг — 2 кольца орбитальных частиц
+// в противоположных направлениях.
 //
-// Что это: глянцевая 3D-сфера (имитация через многослойные радиальные
-// градиенты), вокруг неё медленно вращаются 4 орбитальных частицы.
-// При тишине: сфера дышит, частицы плавно текут.
-// При речи Gemini:
-//   • сфера увеличивается, "пульсирует" в такт RMS
-//   • частицы ускоряются, появляются "следы"
-//   • вокруг — мягкая аура свечения, расширяющаяся при громких звуках
-//
-// На AMOLED S23 Ultra: фон true-black гасит пиксели → сфера светится
-// как настоящий энергошар.
+// Pulse: scale × 1.25 на громких звуках (с pq spring).
+// Glow: внешняя аура расширяется при peak, мерцает в такт level.
+// Particles: 5 + 4 точек, у каждой свой trail из 3 «уходящих» копий.
+// Surface highlight: дополнительный glass-reflection arc сверху.
 // ═══════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator.animations
 
@@ -34,6 +30,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.unit.dp
 import com.translator.app.presentation.theme.AppPalette
 import kotlinx.coroutines.flow.Flow
@@ -46,142 +43,128 @@ fun ObsidianOrb(
     audioFlow: Flow<ByteArray>,
     isAiSpeaking: Boolean
 ) {
-    val audioLevel by rememberAudioLevel(audioFlow, isAiSpeaking, attack = 0.4f, release = 0.07f)
+    val m = rememberAudioMetrics(audioFlow, isAiSpeaking, attack = 0.5f, release = 0.07f)
+    val level by m.level
+    val peak by m.peak
 
-    // Размер сферы — пульсирует на громких звуках.
     val pulseScale by animateFloatAsState(
-        targetValue = if (isAiSpeaking) 1f + audioLevel * 0.22f else 1f,
+        targetValue = if (isAiSpeaking) 1f + level * 0.20f + peak * 0.10f else 1f,
         animationSpec = spring(dampingRatio = 0.5f, stiffness = Spring.StiffnessMedium),
         label = "obsidianPulse"
     )
 
-    // Idle дыхание (всегда работает).
-    val breathTransition = rememberInfiniteTransition(label = "obsidianBreath")
-    val breath by breathTransition.animateFloat(
-        initialValue = 0.92f,
-        targetValue = 1.05f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2400, easing = LinearEasing),
-            repeatMode = RepeatMode.Reverse
-        ),
-        label = "obsidianBreathValue"
+    val breathTr = rememberInfiniteTransition(label = "obsidianBreath")
+    val breath by breathTr.animateFloat(
+        initialValue = 0.93f, targetValue = 1.06f,
+        animationSpec = infiniteRepeatable(tween(2400, easing = LinearEasing), RepeatMode.Reverse),
+        label = "obsidianBreathV"
     )
 
-    // Орбитальное вращение: 1 оборот за 6 секунд idle, ускоряется при речи.
-    val orbitalTransition = rememberInfiniteTransition(label = "obsidianOrbital")
-    val orbitalBase by orbitalTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = (Math.PI * 2f).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(6000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "obsidianOrbitalBase"
+    val rotTr = rememberInfiniteTransition(label = "obsidianRot")
+    val orb1 by rotTr.animateFloat(
+        initialValue = 0f, targetValue = (Math.PI * 2f).toFloat(),
+        animationSpec = infiniteRepeatable(tween(5500, easing = LinearEasing), RepeatMode.Restart),
+        label = "orb1"
+    )
+    val orb2 by rotTr.animateFloat(
+        initialValue = 0f, targetValue = -(Math.PI * 2f).toFloat(),
+        animationSpec = infiniteRepeatable(tween(8200, easing = LinearEasing), RepeatMode.Restart),
+        label = "orb2"
     )
 
-    // Фазовое смещение (второй слой орбиты, обратное направление)
-    val orbitalReverse by orbitalTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = -(Math.PI * 2f).toFloat(),
-        animationSpec = infiniteRepeatable(
-            animation = tween(9000, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "obsidianOrbitalReverse"
-    )
+    val effectiveAngle1 = orb1 + level * orb1 * 0.6f
 
-    val effectiveAngle = orbitalBase + audioLevel * orbitalBase * 0.8f
+    Canvas(modifier = Modifier.size(190.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w / 2f; val cy = h / 2f
+        val baseR = (w.coerceAtMost(h) / 2f) * 0.30f
+        val orbR = baseR * pulseScale * breath
 
-    Canvas(modifier = Modifier.size(180.dp)) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-        val cy = h / 2f
-        val baseRadius = (w.coerceAtMost(h) / 2f) * 0.32f
-        val orbRadius = baseRadius * pulseScale * breath
-
-        // 1. Внешняя аура (3 концентрических слоя)
-        val glowRadius = orbRadius * (3.5f + audioLevel * 1.5f)
+        // ── (1) Outer aura — 4 концентрических слоя
+        val glowR = orbR * (3.8f + level * 1.8f + peak * 0.8f)
         val auraBrush = Brush.radialGradient(
             colors = listOf(
-                palette.accentPrimary.copy(alpha = 0.35f + audioLevel * 0.25f),
-                palette.accentPrimary.copy(alpha = 0.12f),
-                palette.accentSecondary.copy(alpha = 0.06f),
-                androidx.compose.ui.graphics.Color.Transparent
+                palette.accentPrimary.copy(alpha = 0.40f + level * 0.30f),
+                palette.accentPrimary.copy(alpha = 0.15f),
+                palette.accentSecondary.copy(alpha = 0.08f),
+                Color.Transparent
             ),
             center = Offset(cx, cy),
-            radius = glowRadius
+            radius = glowR
         )
-        drawCircle(brush = auraBrush, radius = glowRadius, center = Offset(cx, cy))
+        drawCircle(brush = auraBrush, radius = glowR, center = Offset(cx, cy))
 
-        // 2. Орбитальные частицы (4 точки, 2 направления)
-        val orbitR = orbRadius * 1.85f
-        val particleR = 3.dp.toPx()
+        // ── (2) Outer orbit ring — 5 particles, primary direction
+        val orbitR1 = orbR * 1.9f
+        val pSize1 = 3.4.dp.toPx() + level * 1.4.dp.toPx()
+        for (k in 0 until 5) {
+            val aOff = (Math.PI * 2f / 5f * k).toFloat()
+            val ang = effectiveAngle1 + aOff
+            val px = cx + cos(ang) * orbitR1
+            val py = cy + sin(ang) * orbitR1
+            // Trail: 3 уходящие копии
+            for (t in 0..2) {
+                val tAng = ang - 0.08f * (t + 1)
+                val tpx = cx + cos(tAng) * orbitR1
+                val tpy = cy + sin(tAng) * orbitR1
+                drawCircle(
+                    color = palette.accentPrimary.copy(alpha = 0.18f / (t + 1)),
+                    radius = pSize1 * (1f - t * 0.18f),
+                    center = Offset(tpx, tpy)
+                )
+            }
+            drawCircle(
+                color = palette.accentPrimary.copy(alpha = 0.5f),
+                radius = pSize1 * 2.6f,
+                center = Offset(px, py)
+            )
+            drawCircle(color = palette.accentPrimary, radius = pSize1, center = Offset(px, py))
+        }
+
+        // ── (3) Inner orbit ring — 4 particles, reverse, accentSecondary
+        val orbitR2 = orbR * 2.45f
+        val pSize2 = pSize1 * 0.85f
         for (k in 0 until 4) {
-            val angleOffset = (Math.PI / 2 * k).toFloat()
-            val angle = effectiveAngle + angleOffset
-            val px = cx + cos(angle) * orbitR
-            val py = cy + sin(angle) * orbitR
-            // Glow вокруг частицы (трейл)
+            val aOff = (Math.PI * 2f / 4f * k).toFloat()
+            val ang = orb2 + aOff
+            val px = cx + cos(ang) * orbitR2
+            val py = cy + sin(ang) * orbitR2
             drawCircle(
-                color = palette.accentPrimary.copy(alpha = 0.4f),
-                radius = particleR * 3f,
+                color = palette.accentSecondary.copy(alpha = 0.42f),
+                radius = pSize2 * 2.4f,
                 center = Offset(px, py)
             )
-            drawCircle(
-                color = palette.accentPrimary,
-                radius = particleR,
-                center = Offset(px, py)
-            )
+            drawCircle(color = palette.accentSecondary, radius = pSize2, center = Offset(px, py))
         }
 
-        // 3. Орбитальные частицы (второй слой, обратное направление, lavender)
-        val orbitR2 = orbRadius * 2.35f
-        for (k in 0 until 3) {
-            val angleOffset = (Math.PI * 2 / 3 * k).toFloat()
-            val angle = orbitalReverse + angleOffset
-            val px = cx + cos(angle) * orbitR2
-            val py = cy + sin(angle) * orbitR2
-            drawCircle(
-                color = palette.accentSecondary.copy(alpha = 0.35f),
-                radius = particleR * 2.2f,
-                center = Offset(px, py)
-            )
-            drawCircle(
-                color = palette.accentSecondary,
-                radius = particleR * 0.85f,
-                center = Offset(px, py)
-            )
-        }
-
-        // 4. Тело сферы — радиальный градиент даёт ощущение объёма (3D).
-        val orbBrush = Brush.radialGradient(
+        // ── (4) Orb body — глубокий радиальный градиент
+        val bodyBrush = Brush.radialGradient(
             colors = listOf(
-                palette.accentSecondary,                            // ярко-фиолетовый центр
-                palette.accentPrimary,                              // teal
-                palette.accentPrimary.copy(alpha = 0.75f),
-                palette.accentPrimary.copy(alpha = 0.15f)
+                palette.accentSecondary,
+                palette.accentPrimary,
+                palette.accentPrimary.copy(alpha = 0.7f),
+                palette.accentPrimary.copy(alpha = 0.12f)
             ),
-            center = Offset(cx - orbRadius * 0.3f, cy - orbRadius * 0.4f),  // смещение центра = блик
-            radius = orbRadius * 1.4f
+            center = Offset(cx - orbR * 0.32f, cy - orbR * 0.42f),
+            radius = orbR * 1.5f
         )
-        drawCircle(brush = orbBrush, radius = orbRadius, center = Offset(cx, cy))
+        drawCircle(brush = bodyBrush, radius = orbR, center = Offset(cx, cy))
 
-        // 5. Глянцевый highlight — белый блик в верхней левой части.
-        val highlightR = orbRadius * 0.55f
-        val highlightBrush = Brush.radialGradient(
+        // ── (5) Glass highlight — белый блик
+        val hiR = orbR * 0.58f
+        val hiBrush = Brush.radialGradient(
             colors = listOf(
-                androidx.compose.ui.graphics.Color.White.copy(alpha = 0.55f),
-                androidx.compose.ui.graphics.Color.White.copy(alpha = 0.10f),
-                androidx.compose.ui.graphics.Color.Transparent
+                Color.White.copy(alpha = 0.62f),
+                Color.White.copy(alpha = 0.12f),
+                Color.Transparent
             ),
-            center = Offset(cx - orbRadius * 0.32f, cy - orbRadius * 0.4f),
-            radius = highlightR
+            center = Offset(cx - orbR * 0.34f, cy - orbR * 0.42f),
+            radius = hiR
         )
         drawCircle(
-            brush = highlightBrush,
-            radius = highlightR,
-            center = Offset(cx - orbRadius * 0.32f, cy - orbRadius * 0.4f)
+            brush = hiBrush,
+            radius = hiR,
+            center = Offset(cx - orbR * 0.34f, cy - orbR * 0.42f)
         )
     }
 }
