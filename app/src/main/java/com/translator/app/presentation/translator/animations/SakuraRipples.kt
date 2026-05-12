@@ -1,16 +1,17 @@
 // ═══════════════════════════════════════════════════════════
-// НОВЫЙ ФАЙЛ
+// ПОЛНАЯ ЗАМЕНА (v2.0 — Water Ripples)
 // Путь: app/src/main/java/com/translator/app/presentation/translator/animations/SakuraRipples.kt
 //
-// АНИМАЦИЯ ДЛЯ "SAKURA" — расходящиеся кольца, как от капли.
+// Расходящиеся кольца как от капли в воде.
+// Пул из 8 ring-слотов (zero-alloc). При peak — рождается новое кольцо.
+// При тишине — два медленных «дыхательных» кольца + центральная капля.
 //
-// При тишине: одно тонкое кольцо медленно "дышит".
-// При речи: каждые ~250мс рождается новое кольцо в центре,
-// летит наружу, растёт и затухает. Частота рождения и размер
-// зависят от RMS.
-//
-// Реализация: пул из 6 ring-слотов (zero-alloc), каждый имеет
-// progress 0..1. Когда progress = 1 — слот свободен для нового кольца.
+// Физика:
+//   • spawnInterval ∝ 1/(peak)  → чем громче, тем чаще
+//   • amplitude   ∝ peak        → громкий = большой радиус
+//   • easing      = out-cubic   → естественная вода
+//   • strokeWidth уменьшается с прогрессом → finished ring почти невидим
+//   • alpha       = (1-p)² * amp → плавный fade-out
 // ═══════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator.animations
 
@@ -29,14 +30,13 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.withFrameNanos
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.geometry.Offset
-import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.unit.dp
 import com.translator.app.presentation.theme.AppPalette
 import kotlinx.coroutines.flow.Flow
 
-private const val SLOTS = 6
+private const val SLOTS = 8
 
 @Composable
 fun SakuraRipples(
@@ -44,23 +44,19 @@ fun SakuraRipples(
     audioFlow: Flow<ByteArray>,
     isAiSpeaking: Boolean
 ) {
-    val audioLevel by rememberAudioLevel(audioFlow, isAiSpeaking, attack = 0.4f, release = 0.06f)
+    val m = rememberAudioMetrics(audioFlow, isAiSpeaking, attack = 0.55f, release = 0.06f)
+    val level by m.level
+    val peak by m.peak
 
-    // progress[i] in [0..1]. 1 = свободно.
     val progress = remember { FloatArray(SLOTS) { 1f } }
-    val amplitude = remember { FloatArray(SLOTS) } // снимок RMS на момент рождения
-    val lastSpawnNanos = remember { longArrayOf(0L) }
+    val amplitude = remember { FloatArray(SLOTS) }
+    val lastSpawn = remember { longArrayOf(0L) }
 
-    // Idle: одиночное медленное кольцо
-    val idleTransition = rememberInfiniteTransition(label = "sakuraIdle")
-    val idlePhase by idleTransition.animateFloat(
-        initialValue = 0f,
-        targetValue = 1f,
-        animationSpec = infiniteRepeatable(
-            animation = tween(2800, easing = LinearEasing),
-            repeatMode = RepeatMode.Restart
-        ),
-        label = "sakuraIdlePhase"
+    val idleTr = rememberInfiniteTransition(label = "sakuraIdle")
+    val idlePhase by idleTr.animateFloat(
+        initialValue = 0f, targetValue = 1f,
+        animationSpec = infiniteRepeatable(tween(3000, easing = LinearEasing), RepeatMode.Restart),
+        label = "sakuraIdlePh"
     )
 
     LaunchedEffect(audioFlow, isAiSpeaking) {
@@ -70,26 +66,22 @@ fun SakuraRipples(
                 val dt = (now - prev).coerceAtLeast(0L) / 1_000_000_000f
                 prev = now
 
-                // Скорость расширения зависит от среднего уровня — но не сильно.
-                val expandSpeed = 0.42f + audioLevel * 0.25f
+                val expandSpeed = 0.44f + level * 0.32f
                 for (i in 0 until SLOTS) {
                     if (progress[i] < 1f) {
                         progress[i] = (progress[i] + dt * expandSpeed).coerceAtMost(1f)
                     }
                 }
 
-                // Рождение новых колец только если есть свободные слоты
-                // и интервал между спавнами зависит от RMS.
-                if (isAiSpeaking && audioLevel > 0.04f) {
-                    val intervalNs = (300_000_000L - (audioLevel * 200_000_000L).toLong())
-                        .coerceAtLeast(120_000_000L)
-                    if (now - lastSpawnNanos[0] > intervalNs) {
-                        // Найти свободный слот
+                if (isAiSpeaking && peak > 0.06f) {
+                    val intervalNs = (320_000_000L - (peak * 240_000_000L).toLong())
+                        .coerceAtLeast(110_000_000L)
+                    if (now - lastSpawn[0] > intervalNs) {
                         for (i in 0 until SLOTS) {
                             if (progress[i] >= 1f) {
                                 progress[i] = 0f
-                                amplitude[i] = (0.6f + audioLevel * 0.4f).coerceIn(0f, 1f)
-                                lastSpawnNanos[0] = now
+                                amplitude[i] = (0.55f + peak * 0.45f).coerceIn(0f, 1f)
+                                lastSpawn[0] = now
                                 break
                             }
                         }
@@ -99,56 +91,51 @@ fun SakuraRipples(
         }
     }
 
-    Canvas(modifier = Modifier.size(140.dp)) {
-        val w = size.width
-        val h = size.height
-        val cx = w / 2f
-        val cy = h / 2f
+    Canvas(modifier = Modifier.size(160.dp)) {
+        val w = size.width; val h = size.height
+        val cx = w / 2f; val cy = h / 2f
         val maxR = (w.coerceAtMost(h) / 2f) - 4f
         val minR = 4.dp.toPx()
 
-        // Центральная "капля" — её размер пульсирует от RMS.
-        val coreRadius = (8.dp.toPx() + audioLevel * 14.dp.toPx())
+        // ── Центральная капля
+        val coreRadius = 7.dp.toPx() + level * 18.dp.toPx() + peak * 6.dp.toPx()
         val coreBrush = Brush.radialGradient(
             colors = listOf(palette.accentPrimary, palette.accentPrimary.copy(alpha = 0f)),
             center = Offset(cx, cy),
-            radius = coreRadius * 2.2f
+            radius = coreRadius * 2.4f
         )
-        drawCircle(brush = coreBrush, radius = coreRadius * 2.2f, center = Offset(cx, cy))
-        drawCircle(
-            color = palette.accentPrimary,
-            radius = coreRadius,
-            center = Offset(cx, cy)
-        )
+        drawCircle(brush = coreBrush, radius = coreRadius * 2.4f, center = Offset(cx, cy))
+        drawCircle(color = palette.accentPrimary, radius = coreRadius, center = Offset(cx, cy))
 
-        // Idle кольцо: пульсирующее, всегда есть.
-        if (!isAiSpeaking || audioLevel < 0.05f) {
-            val idleR = minR + idlePhase * (maxR - minR) * 0.6f
-            val idleAlpha = (1f - idlePhase) * 0.32f
-            drawCircle(
-                color = palette.accentSecondary.copy(alpha = idleAlpha),
-                radius = idleR,
-                center = Offset(cx, cy),
-                style = Stroke(width = 1.4.dp.toPx())
-            )
+        // ── Idle двойное дыхание
+        if (!isAiSpeaking || level < 0.05f) {
+            for (k in 0..1) {
+                val ph = (idlePhase + k * 0.5f) % 1f
+                val r = minR + ph * (maxR - minR) * 0.62f
+                val a = (1f - ph) * (1f - ph) * 0.35f
+                drawCircle(
+                    color = palette.accentSecondary.copy(alpha = a),
+                    radius = r,
+                    center = Offset(cx, cy),
+                    style = Stroke(width = 1.4.dp.toPx())
+                )
+            }
         }
 
-        // Активные ripples
+        // ── Active ripples
         for (i in 0 until SLOTS) {
             val p = progress[i]
             if (p >= 1f) continue
-
-            // Easing — out cubic для естественной воды
-            val eased = 1f - (1f - p) * (1f - p) * (1f - p)
+            val eased = 1f - (1f - p) * (1f - p) * (1f - p)         // out-cubic
             val r = minR + eased * (maxR - minR) * amplitude[i]
-            val alpha = (1f - p) * 0.55f * amplitude[i]
-
+            val a = (1f - p) * (1f - p) * 0.65f * amplitude[i]
             val ringColor = if (i % 2 == 0) palette.accentPrimary else palette.accentSecondary
+            val strokePx = (2.4f - p * 1.6f).coerceAtLeast(0.4f).dp.toPx()
             drawCircle(
-                color = ringColor.copy(alpha = alpha),
+                color = ringColor.copy(alpha = a),
                 radius = r,
                 center = Offset(cx, cy),
-                style = Stroke(width = (2f - p * 1.2f).coerceAtLeast(0.5f).dp.toPx())
+                style = Stroke(width = strokePx)
             )
         }
     }
