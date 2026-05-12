@@ -41,7 +41,8 @@ enum class AppThemeId(val displayKey: String) {
     SAKURA("theme_sakura"),
     OBSIDIAN("theme_obsidian"),
     OPEN_OASIS("theme_open_oasis"),
-    GEMINI_NEXUS("theme_gemini_nexus");
+    GEMINI_NEXUS("theme_gemini_nexus"),
+    GEM("theme_gem");
 
     companion object {
         fun fromName(name: String?): AppThemeId =
@@ -260,6 +261,33 @@ data class AppPalette(
             auraGlow = Color(0xFF7D20BE)
         )
 
+        // ─── 7. GEM (Apple-clean + Gemini Sparkle) ──────────
+        val Gem = AppPalette(
+            id = AppThemeId.GEM, isDark = false,
+            background       = Color(0xFFFFFFFF),
+            surface          = Color(0xFFFFFFFF),
+            surfaceElevated  = Color(0xFFFFFFFF),
+            surfaceHigh      = Color(0xFFF5F8FC),
+            textPrimary      = Color(0xFF0A0A0A),
+            textSecondary    = Color(0xFF6E6E73),
+            textMuted        = Color(0xFFAEAEB2),
+            textOnAccent     = Color(0xFFFFFFFF),
+            accentPrimary    = Color(0xFF4285F4),
+            accentSecondary  = Color(0xFF34A853),
+            accentSoft       = Color(0xFFE8F0FE),
+            border           = Color(0xFFBAE6FD),
+            divider          = Color(0xFF7DD3FC),
+            statusRecording  = Color(0xFF34A853),
+            statusOk         = Color(0xFF34A853),
+            statusWarning    = Color(0xFFFBBC04),
+            aura0 = Color(0xFF34A853),
+            aura1 = Color(0xFF06B6D4),
+            aura2 = Color(0xFF4285F4),
+            aura3 = Color(0xFFFBBC04),
+            aura4 = Color(0xFFEA4335),
+            auraGlow = Color(0xFF34A853)
+        )
+
         fun byId(id: AppThemeId): AppPalette = when (id) {
             AppThemeId.AURORA       -> Aurora
             AppThemeId.BERLIN_MIST  -> BerlinMist
@@ -267,6 +295,7 @@ data class AppPalette(
             AppThemeId.OBSIDIAN     -> Obsidian
             AppThemeId.OPEN_OASIS   -> OpenOasis
             AppThemeId.GEMINI_NEXUS -> GeminiNexus
+            AppThemeId.GEM          -> Gem
         }
     }
 }
