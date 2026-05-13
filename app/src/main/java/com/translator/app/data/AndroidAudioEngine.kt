@@ -249,14 +249,15 @@ class AndroidAudioEngine(
         captureJob = engineScope.launch {
             val buffer = ShortArray(minBuf)
 
-            // ═══ Программный AGC (baseline) ═══
+            // ═══ Программный AGC (translator-tuned, soft) ═══
             var rollingPeak = 4000
-            val targetPeak = 24000
+            val targetPeak = 18_000          // было 24000 — мягче, не клипуем
             val agcAttack = 0.4f
             val agcRelease = 0.015f
-            val agcMaxBoost = 8.0f
-            val agcMinBoost = 0.6f
-            val noiseFloor = 300
+            val agcMaxBoost = 3.0f           // было 8.0f — критично для серверного VAD!
+            val agcMinBoost = 0.8f           // было 0.6f
+            val noiseFloor = 800             // было 300 — выше floor → меньше шум-буст
+            val noiseGateThreshold = 600     // НОВОЕ: ниже этого — обнуляем буфер
 
             try {
                 while (isActive && isCapturing) {
@@ -279,13 +280,18 @@ class AndroidAudioEngine(
                                 .coerceIn(agcMinBoost, agcMaxBoost)
                             val finalGain = agcGain * micGain
 
-                            // Применяем gain + hard-clip к int16
-                            for (i in 0 until read) {
-                                val amplified = (buffer[i] * finalGain).toInt()
-                                buffer[i] = when {
-                                    amplified > Short.MAX_VALUE -> Short.MAX_VALUE
-                                    amplified < Short.MIN_VALUE -> Short.MIN_VALUE
-                                    else -> amplified.toShort()
+                            // Noise gate: если пик блока ниже порога — обнуляем
+                            // (защищает серверный VAD от ложных start-of-speech на тишине)
+                            if (localPeak < noiseGateThreshold) {
+                                for (i in 0 until read) buffer[i] = 0
+                            } else {
+                                for (i in 0 until read) {
+                                    val amplified = (buffer[i] * finalGain).toInt()
+                                    buffer[i] = when {
+                                        amplified > Short.MAX_VALUE -> Short.MAX_VALUE
+                                        amplified < Short.MIN_VALUE -> Short.MIN_VALUE
+                                        else -> amplified.toShort()
+                                    }
                                 }
                             }
 
@@ -422,6 +428,7 @@ class AndroidAudioEngine(
                         _playbackSync.tryEmit(boosted)
                         runCatching { track.write(boosted, 0, boosted.size) }
                     }
+
                     if (awaitingDrain && playbackChannel.isEmpty) {
                         awaitingDrain = false
                         isFirstBatch = true
