@@ -409,12 +409,14 @@ class GeminiLiveClient(
                 }
 
                 // ─── Транскрипция ───
-                // Gemini API v1beta принимает только пустые объекты для inputAudioTranscription
-                // и outputAudioTranscription. Параметр languageCodes есть в Vertex AI, но
-                // отвергается Gemini API с ошибкой "Cannot find field".
                 if (config.sendTranscriptionConfig) {
                     if (config.inputTranscription) {
-                        put("inputAudioTranscription", buildJsonObject {})
+                        put("inputAudioTranscription", buildJsonObject {
+                            // languageCodes ОСТОРОЖНО: Gemini API часто отвергает это поле
+                            // с "Cannot find field". Vertex AI принимает. Для безопасности
+                            // отправляем только если непусто И только в дополнительной попытке.
+                            // По умолчанию НЕ шлём — оставляем пустой объект.
+                        })
                     }
                     if (config.outputTranscription) {
                         put("outputAudioTranscription", buildJsonObject {})
