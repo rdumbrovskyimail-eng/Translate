@@ -63,15 +63,60 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.translator.app.presentation.theme.AppThemeId
 import com.translator.app.presentation.translator.reveal.MessageRevealId
 
+// Промпт 8 — 30 голосов с полом
 private val AVAILABLE_VOICES = listOf(
-    "Puck"   to "Puck ♂ (энергичный)",
-    "Charon" to "Charon ♂ (серьёзный)",
-    "Fenrir" to "Fenrir ♂ (низкий)",
-    "Orus"   to "Orus ♂ (дружелюбный)",
-    "Kore"   to "Kore ♀ (мягкий)",
-    "Aoede"  to "Aoede ♀ (тёплый)",
-    "Leda"   to "Leda ♀ (живой)",
-    "Zephyr" to "Zephyr ♀ (спокойный)"
+    // Bright
+    "Zephyr"        to "Zephyr ♀ — Bright",
+    "Autonoe"       to "Autonoe ♀ — Bright",
+    // Upbeat
+    "Puck"          to "Puck ♂ — Upbeat",
+    "Laomedeia"     to "Laomedeia ♀ — Upbeat",
+    // Informative
+    "Charon"        to "Charon ♂ — Informative",
+    "Rasalgethi"    to "Rasalgethi ♂ — Informative",
+    // Firm
+    "Kore"          to "Kore ♀ — Firm",
+    "Orus"          to "Orus ♂ — Firm",
+    "Alnilam"       to "Alnilam ♂ — Firm",
+    // Excitable
+    "Fenrir"        to "Fenrir ♂ — Excitable",
+    // Youthful
+    "Leda"          to "Leda ♀ — Youthful",
+    // Breezy
+    "Aoede"         to "Aoede ♀ — Breezy",
+    // Easy-going
+    "Callirrhoe"    to "Callirrhoe ♀ — Easy-going",
+    "Umbriel"       to "Umbriel ♂ — Easy-going",
+    // Breathy
+    "Enceladus"     to "Enceladus ♂ — Breathy",
+    // Clear
+    "Iapetus"       to "Iapetus ♂ — Clear",
+    "Erinome"       to "Erinome ♀ — Clear",
+    // Smooth
+    "Algieba"       to "Algieba ♂ — Smooth",
+    "Despina"       to "Despina ♀ — Smooth",
+    // Gravelly
+    "Algenib"       to "Algenib ♂ — Gravelly",
+    // Soft
+    "Achernar"      to "Achernar ♀ — Soft",
+    // Even
+    "Schedar"       to "Schedar ♂ — Even",
+    // Mature
+    "Gacrux"        to "Gacrux ♂ — Mature",
+    // Forward
+    "Pulcherrima"   to "Pulcherrima ♀ — Forward",
+    // Friendly
+    "Achird"        to "Achird ♂ — Friendly",
+    // Casual
+    "Zubenelgenubi" to "Zubenelgenubi ♂ — Casual",
+    // Gentle
+    "Vindemiatrix"  to "Vindemiatrix ♀ — Gentle",
+    // Lively
+    "Sadachbia"     to "Sadachbia ♂ — Lively",
+    // Knowledgeable
+    "Sadaltager"    to "Sadaltager ♂ — Knowledgeable",
+    // Warm
+    "Sulafat"       to "Sulafat ♀ — Warm"
 )
 
 private val LATENCY_PROFILES = listOf(
@@ -84,6 +129,18 @@ private val LATENCY_PROFILES = listOf(
 
 private val VAD_START_SENS = listOf("START_SENSITIVITY_LOW", "START_SENSITIVITY_HIGH")
 private val VAD_END_SENS   = listOf("END_SENSITIVITY_LOW", "END_SENSITIVITY_HIGH")
+
+// Промпт 9.1
+private val TURN_COVERAGE_OPTIONS = listOf(
+    "TURN_INCLUDES_ONLY_ACTIVITY"                to "Только речь (экономит токены)",
+    "TURN_INCLUDES_ALL_INPUT"                    to "Всё аудио + видео",
+    "TURN_INCLUDES_AUDIO_ACTIVITY_AND_ALL_VIDEO" to "Речь + все видеокадры"
+)
+
+private val ACTIVITY_HANDLING_OPTIONS = listOf(
+    "START_OF_ACTIVITY_INTERRUPTS" to "Перебивать модель (barge-in)",
+    "NO_INTERRUPTION"              to "Не перебивать"
+)
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -267,6 +324,25 @@ fun SettingsScreen(
                     range = 100f..2000f,
                     onChange = { v -> viewModel.update { copy(vadSilenceDurationMs = v.toInt()) } }
                 )
+                // Промпт 9.2
+                SliderRow(
+                    title = "Preroll речи: ${s.vadPrefixPaddingMs}ms",
+                    value = s.vadPrefixPaddingMs.toFloat(),
+                    range = 0f..500f,
+                    onChange = { v -> viewModel.update { copy(vadPrefixPaddingMs = v.toInt()) } }
+                )
+                DropdownSetting(
+                    label = "Что входит в ход пользователя",
+                    value = s.turnCoverage,
+                    options = TURN_COVERAGE_OPTIONS,
+                    onSelect = { v -> viewModel.update { copy(turnCoverage = v) } }
+                )
+                DropdownSetting(
+                    label = "Поведение при начале речи",
+                    value = s.activityHandling,
+                    options = ACTIVITY_HANDLING_OPTIONS,
+                    onSelect = { v -> viewModel.update { copy(activityHandling = v) } }
+                )
 
                 // ─── 6. TRANSCRIPTION ───
                 SectionTitle("Транскрипция")
@@ -289,6 +365,12 @@ fun SettingsScreen(
                     options = LATENCY_PROFILES,
                     onSelect = { v -> viewModel.update { copy(latencyProfile = v) } }
                 )
+                // Промпт 9.4
+                SwitchRow(
+                    title = "Включить thought summaries (тратит токены)",
+                    checked = s.includeThoughts,
+                    onChange = { v -> viewModel.update { copy(includeThoughts = v) } }
+                )
 
                 // ─── 8. SESSION ───
                 SectionTitle("Сессия")
@@ -302,6 +384,21 @@ fun SettingsScreen(
                     checked = s.enableContextCompression,
                     onChange = { v -> viewModel.update { copy(enableContextCompression = v) } }
                 )
+                // Промпт 9.3
+                if (s.enableContextCompression) {
+                    SliderRow(
+                        title = "Триггер сжатия: ${s.compressionTriggerTokens / 1000}K токенов",
+                        value = s.compressionTriggerTokens.toFloat(),
+                        range = 8_000f..120_000f,
+                        onChange = { v -> viewModel.update { copy(compressionTriggerTokens = v.toLong()) } }
+                    )
+                    SliderRow(
+                        title = "Цель сжатия: ${s.compressionTargetTokens / 1000}K токенов",
+                        value = s.compressionTargetTokens.toFloat(),
+                        range = 4_000f..60_000f,
+                        onChange = { v -> viewModel.update { copy(compressionTargetTokens = v.toLong()) } }
+                    )
+                }
 
                 // ─── 9. RECONNECT ───
                 SectionTitle("Переподключение")
