@@ -35,10 +35,12 @@ import kotlinx.coroutines.flow.Flow
  *  4. sendRealtimeText()   — текст в ходе диалога (realtimeInput.text)
  *  5. sendVideoFrame()     — JPEG-кадр (realtimeInput.video, ≤1 FPS)
  *  6. sendAudioStreamEnd() — flush серверного audio кеша при паузе mic
- *  7. sendTurnComplete()   — сигнал окончания хода
- *  8. sendToolResponse()   — ответ на tool call
- *  9. restoreContext()     — seeding истории (только в начале сессии!)
- * 10. disconnect()         — штатное закрытие С ОЖИДАНИЕМ onClosed
+ *  7. sendActivityStart()  — ручной VAD: начало речи (disabled auto VAD)
+ *  8. sendActivityEnd()    — ручной VAD: конец речи (disabled auto VAD)
+ *  9. sendTurnComplete()   — сигнал окончания хода
+ * 10. sendToolResponse()   — ответ на tool call
+ * 11. restoreContext()     — seeding истории (только в начале сессии!)
+ * 12. disconnect()         — штатное закрытие С ОЖИДАНИЕМ onClosed
  */
 interface LiveClient {
 
@@ -94,6 +96,18 @@ interface LiveClient {
      * Вызывать при паузе/остановке микрофона.
      */
     fun sendAudioStreamEnd()
+
+    /**
+     * Отправить activityStart (только в режиме disabled automatic VAD).
+     * См. realtimeInputConfig.automaticActivityDetection.disabled = true.
+     */
+    fun sendActivityStart()
+
+    /**
+     * Отправить activityEnd (только в режиме disabled automatic VAD).
+     * Заменяет audioStreamEnd в этом режиме.
+     */
+    fun sendActivityEnd()
 
     fun sendTurnComplete()
     fun sendToolResponse(responses: List<ToolResponse>)
