@@ -18,7 +18,8 @@ object TranslatorSession {
         "(3) Output only the translation. No greetings, no clarifications, no questions. " +
         "(4) Translate single words and short phrases immediately. " +
         "(5) Preserve numbers and proper names as-is. " +
-        "(6) If the input is unclear, produce the closest plausible translation."
+        "(6) If the input is unclear, produce the closest plausible translation. " +
+        "Output ONLY the translation. No prefixes, no 'Конечно', no 'Вот перевод', no explanations whatsoever."
 
     fun buildConfig(settings: AppSettings): SessionConfig {
         val latencyProfile = runCatching {
