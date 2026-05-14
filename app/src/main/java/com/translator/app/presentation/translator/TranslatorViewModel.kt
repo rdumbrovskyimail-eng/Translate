@@ -17,8 +17,8 @@ import com.translator.app.domain.model.GeminiEvent
 import com.translator.app.util.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
+import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
-import kotlinx.coroutines.GlobalScope
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.delay
@@ -450,7 +450,7 @@ class TranslatorViewModel @Inject constructor(
 
     override fun onCleared() {
         super.onCleared()
-        GlobalScope.launch(Dispatchers.IO + NonCancellable) {
+        CoroutineScope(Dispatchers.IO + NonCancellable).launch {
             runCatching {
                 withTimeoutOrNull(1000L) {
                     audioEngine.stopCapture()
