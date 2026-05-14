@@ -89,7 +89,6 @@ class GeminiLiveClient(
     private val lastSentFrames = java.util.ArrayDeque<String>(3)
 
     private fun trackSentFrame(raw: String) {
-        if (!logRawFrames) return
         synchronized(lastSentFrames) {
             if (lastSentFrames.size >= 3) lastSentFrames.pollFirst()
             lastSentFrames.offerLast(raw.take(2000))
