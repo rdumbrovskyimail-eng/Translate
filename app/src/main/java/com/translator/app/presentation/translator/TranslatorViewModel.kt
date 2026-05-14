@@ -418,7 +418,7 @@ class TranslatorViewModel @Inject constructor(
 
     private fun detectLang(text: String): String {
         if (text.isBlank()) return ""
-        val hasCyr = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
+        val hasCyr = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' || it in "іїєґўІЇЄҐЎ" }
         return if (hasCyr) "RU" else "DE"
     }
 
