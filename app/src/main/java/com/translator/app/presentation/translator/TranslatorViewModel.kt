@@ -294,40 +294,39 @@ class TranslatorViewModel @Inject constructor(
                         scheduleReconnect() 
                     }
                     is GeminiEvent.Disconnected -> {
-                        // Закрываем mic-петлю чтобы не было fantom-эмиссий.
                         micJob?.cancel(); micJob = null
                         audioEngine.stopCapture()
+
+                        val isPermanent = event.code in setOf(1008, 4001, 4003)
+                        val isGraceful = event.code == 1000 || event.code == 1001
 
                         _state.update {
                             it.copy(
                                 connectionStatus = ConnectionStatus.Disconnected,
                                 isMicActive = false,
-                                isAiSpeaking = false
+                                isAiSpeaking = false,
+                                error = if (isPermanent) "Модель/ключ невалидны (${event.code}): ${event.reason}" else it.error
                             )
                         }
-                        if (event.code != 1000 && event.code != 1001) scheduleReconnect()
-                    }
-                    is GeminiEvent.ConnectionError -> {
-                        val msg = event.message
+
+                        if (isPermanent) {
+                            logger.e("⛔ Permanent error ${event.code} — reconnect aborted")
+                            reconnectAttempt.set(cachedSettings.maxReconnectAttempts.toLong())
+                            return@collect
+                        }
+
+                        val msg = event.reason
                         val isRate = msg.contains("429") || msg.contains("rate", ignoreCase = true)
-                        if (isRate && cachedSettings.autoRotateKeys &&
-                            cachedSettings.apiKeyBackup.isNotEmpty()
-                        ) {
+                        if (isRate && cachedSettings.autoRotateKeys && cachedSettings.apiKeyBackup.isNotEmpty()) {
                             activeApiKey = if (activeApiKey == cachedSettings.apiKey)
                                 cachedSettings.apiKeyBackup else cachedSettings.apiKey
                             logger.d("Rotated to backup key")
                         }
-                        micJob?.cancel(); micJob = null
-                        _state.update {
-                            it.copy(
-                                connectionStatus = ConnectionStatus.Disconnected,
-                                isMicActive = false,
-                                isAiSpeaking = false,
-                                error = msg
-                            )
-                        }
-                        audioEngine.stopCapture()
-                        scheduleReconnect()
+
+                        if (!isGraceful) scheduleReconnect()
+                    }
+                    is GeminiEvent.ConnectionError -> {
+                        _state.update { it.copy(error = event.message) }
                     }
                     else -> {}
                 }
