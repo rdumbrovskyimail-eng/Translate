@@ -96,8 +96,14 @@ fun rememberAudioMetrics(
         }
     }
 
-    // 2. Кадровый smoother: 60/90/120 fps, dt-aware, всё в FloatState.
+    // 2. Кадровый smoother — работает только в активном режиме.
     LaunchedEffect(active) {
+        if (!active) {
+            level.floatValue = 0f
+            peak.floatValue = 0f
+            velocity.floatValue = 0f
+            return@LaunchedEffect
+        }
         var prevT = System.nanoTime()
         while (true) {
             withFrameNanos { now ->
