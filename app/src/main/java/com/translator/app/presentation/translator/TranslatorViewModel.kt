@@ -14,6 +14,8 @@ import com.translator.app.data.settings.AppSettings
 import com.translator.app.domain.AudioEngine
 import com.translator.app.domain.LiveClient
 import com.translator.app.domain.model.GeminiEvent
+import com.translator.app.domain.model.Language
+import com.translator.app.domain.model.Languages
 import com.translator.app.util.AppLogger
 import dagger.hilt.android.lifecycle.HiltViewModel
 import dagger.hilt.android.qualifiers.ApplicationContext
@@ -24,6 +26,8 @@ import kotlinx.coroutines.NonCancellable
 import kotlinx.coroutines.cancelAndJoin
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
@@ -43,7 +47,9 @@ data class TranslatorState(
     val error: String? = null,
     val promptTokens: Int = 0,
     val responseTokens: Int = 0,
-    val totalTokens: Int = 0
+    val totalTokens: Int = 0,
+    val sourceLanguage: Language = Languages.DEFAULT_SOURCE,
+    val targetLanguage: Language = Languages.DEFAULT_TARGET
 )
 
 @HiltViewModel
@@ -85,6 +91,48 @@ class TranslatorViewModel @Inject constructor(
         viewModelScope.launch { audioEngine.initPlayback() }
         observeGeminiEvents()
         observeNetwork()
+        observeLanguageSettings()
+    }
+
+    private fun observeLanguageSettings() {
+        viewModelScope.launch {
+            settingsStore.data
+                .map { it.sourceLanguageCode to it.targetLanguageCode }
+                .distinctUntilChanged()
+                .collect { (srcCode, tgtCode) ->
+                    _state.update {
+                        it.copy(
+                            sourceLanguage = Languages.byCode(srcCode),
+                            targetLanguage = Languages.byCode(tgtCode)
+                        )
+                    }
+                }
+        }
+    }
+
+    fun setSourceLanguage(language: Language) {
+        if (language.code == _state.value.targetLanguage.code) return
+        viewModelScope.launch {
+            settingsStore.updateData { it.copy(sourceLanguageCode = language.code) }
+        }
+    }
+
+    fun setTargetLanguage(language: Language) {
+        if (language.code == _state.value.sourceLanguage.code) return
+        viewModelScope.launch {
+            settingsStore.updateData { it.copy(targetLanguageCode = language.code) }
+        }
+    }
+
+    fun swapLanguages() {
+        viewModelScope.launch {
+            settingsStore.updateData {
+                it.copy(
+                    sourceLanguageCode = it.targetLanguageCode,
+                    targetLanguageCode = it.sourceLanguageCode
+                )
+            }
+        }
     }
 
     private fun hasMicPermission(): Boolean =
