@@ -150,8 +150,10 @@ class GeminiLiveForegroundService : Service() {
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
         if (focusChange == AudioManager.AUDIOFOCUS_LOSS) {
-            val intent = Intent(this, GeminiLiveForegroundService::class.java).apply { action = ACTION_STOP }
-            startService(intent)
+            releaseAudioFocus()
+            releaseAudioRouting()
+            stopForeground(STOP_FOREGROUND_REMOVE)
+            stopSelf()
         }
     }
 
