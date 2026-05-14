@@ -113,44 +113,61 @@ class TranslatorViewModel @Inject constructor(
     fun setSourceLanguage(language: Language) {
         if (language.code == _state.value.targetLanguage.code) return
         viewModelScope.launch {
-            settingsStore.updateData { it.copy(sourceLanguageCode = language.code) }
-            reconnectIfActive()
+            val updated = settingsStore.updateData { it.copy(sourceLanguageCode = language.code) }
+            reconnectWithFresh(updated)
         }
     }
 
     fun setTargetLanguage(language: Language) {
         if (language.code == _state.value.sourceLanguage.code) return
         viewModelScope.launch {
-            settingsStore.updateData { it.copy(targetLanguageCode = language.code) }
-            reconnectIfActive()
+            val updated = settingsStore.updateData { it.copy(targetLanguageCode = language.code) }
+            reconnectWithFresh(updated)
         }
     }
 
     fun swapLanguages() {
         viewModelScope.launch {
-            settingsStore.updateData {
+            val updated = settingsStore.updateData {
                 it.copy(
                     sourceLanguageCode = it.targetLanguageCode,
                     targetLanguageCode = it.sourceLanguageCode
                 )
             }
-            reconnectIfActive()
+            reconnectWithFresh(updated)
         }
     }
 
-    private suspend fun reconnectIfActive() {
+    private suspend fun reconnectWithFresh(freshSettings: AppSettings) {
         val status = _state.value.connectionStatus
-        if (status == ConnectionStatus.Ready ||
-            status == ConnectionStatus.Recording ||
-            status == ConnectionStatus.Reconnecting
-        ) {
-            logger.d("Language changed — reconnecting with new system instruction")
-            micJob?.cancelAndJoin(); micJob = null
-            audioEngine.stopCapture()
-            liveClient.disconnect()
-            cachedSettings = settingsStore.data.first()
-            connectInternal()
+        if (status == ConnectionStatus.Disconnected) {
+            cachedSettings = freshSettings
+            return
         }
+        logger.d("Language pair changed → ${freshSettings.sourceLanguageCode}↔${freshSettings.targetLanguageCode}, hard reconnect")
+
+        // Жёсткий сброс — полная переинициализация сессии с новым system instruction.
+        reconnectJob?.cancelAndJoin(); reconnectJob = null
+        reconnectAttempt.set(0L)
+        micJob?.cancelAndJoin(); micJob = null
+        audioEngine.stopCapture()
+        runCatching { audioEngine.flushPlayback() }
+        liveClient.disconnect()
+
+        // Сбрасываем UI-state переводов, чтобы пользователь видел чистый старт.
+        _state.update {
+            it.copy(
+                pairs = emptyList(),
+                isMicActive = false,
+                isAiSpeaking = false,
+                connectionStatus = ConnectionStatus.Connecting
+            )
+        }
+        currentOpenPairId = null
+        nextPairId = 1L
+
+        cachedSettings = freshSettings
+        connectInternal()
     }
 
     private fun hasMicPermission(): Boolean =
