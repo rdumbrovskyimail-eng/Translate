@@ -14,6 +14,7 @@ import javax.inject.Singleton
 @Module
 @InstallIn(SingletonComponent::class)
 object AppModule {
+
     @Provides
     @Singleton
     fun provideLiveClient(logger: AppLogger): LiveClient = GeminiLiveClient(logger)
