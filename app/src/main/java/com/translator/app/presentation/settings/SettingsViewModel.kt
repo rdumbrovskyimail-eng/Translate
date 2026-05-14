@@ -7,6 +7,7 @@ import com.translator.app.data.settings.AppSettings
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.launchIn
 import kotlinx.coroutines.flow.onEach
 import kotlinx.coroutines.flow.update
@@ -24,6 +25,7 @@ class SettingsViewModel @Inject constructor(
     init {
         // Единственный источник правды — поток DataStore. Первое значение придёт сразу.
         settingsStore.data
+            .distinctUntilChanged()
             .onEach { fromDisk -> _settings.value = fromDisk }
             .launchIn(viewModelScope)
     }
