@@ -413,9 +413,14 @@ class AndroidAudioEngine(
             val high = out[i + 1].toInt()
             val sample = (high shl 8) or low
             val signed = if (sample and 0x8000 != 0) sample or 0xFFFF0000.toInt() else sample
-            val norm = signed / 32768f
-            val soft = tanh(norm * boost) * 32760f
-            val clipped = soft.toInt()
+            
+            // Быстрый Soft Clipper (x - x^3/3)
+            var x = (signed / 32768f) * boost
+            x = x.coerceIn(-1.5f, 1.5f)
+            var soft = x - (x * x * x) / 3f
+            soft = soft.coerceIn(-1f, 1f)
+            
+            val clipped = (soft * 32760f).toInt()
             out[i] = (clipped and 0xFF).toByte()
             out[i + 1] = ((clipped shr 8) and 0xFF).toByte()
             i += 2
