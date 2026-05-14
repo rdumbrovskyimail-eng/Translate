@@ -421,7 +421,7 @@ class GeminiLiveClient(
                     val obj = fc.jsonObject
                     val name = obj["name"]?.jsonPrimitive?.content ?: return@mapNotNull null
                     val id = obj["id"]?.jsonPrimitive?.content ?: return@mapNotNull null
-                    val args = obj["args"]?.jsonObject?.mapValues { it.value.jsonPrimitive.content } ?: emptyMap()
+                    val args = obj["args"]?.jsonObject?.mapValues { it.value.toString() } ?: emptyMap()
                     com.translator.app.domain.model.FunctionCall(name, id, args)
                 } ?: emptyList()
 
