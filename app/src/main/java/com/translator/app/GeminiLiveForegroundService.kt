@@ -116,6 +116,9 @@ class GeminiLiveForegroundService : Service() {
                 if (target != null) {
                     communicationDeviceSet = am.setCommunicationDevice(target)
                     am.mode = AudioManager.MODE_IN_COMMUNICATION
+                    if (target.type == AudioDeviceInfo.TYPE_BLUETOOTH_SCO) {
+                        am.startBluetoothSco()
+                    }
                 }
             }
             return
@@ -129,16 +132,17 @@ class GeminiLiveForegroundService : Service() {
 
     private fun releaseAudioRouting() {
         val am = audioManager ?: return
+        am.stopBluetoothSco()
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (communicationDeviceSet) {
                 runCatching { am.clearCommunicationDevice() }
                 communicationDeviceSet = false
             }
-            am.mode = AudioManager.MODE_IN_COMMUNICATION
+            am.mode = AudioManager.MODE_NORMAL
             return
         }
         @Suppress("DEPRECATION")
-        run { am.isSpeakerphoneOn = false; am.mode = AudioManager.MODE_IN_COMMUNICATION }
+        run { am.isSpeakerphoneOn = false; am.mode = AudioManager.MODE_NORMAL }
     }
 
     private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
