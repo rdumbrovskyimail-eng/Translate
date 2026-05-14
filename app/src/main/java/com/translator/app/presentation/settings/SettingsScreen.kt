@@ -28,6 +28,10 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.CheckCircle
+import androidx.compose.material.icons.filled.Error
+import androidx.compose.material3.Button
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -53,6 +57,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.text.input.VisualTransformation
@@ -153,6 +158,20 @@ fun SettingsScreen(
     var keyVisible by rememberSaveable { mutableStateOf(false) }
     var backupKeyVisible by rememberSaveable { mutableStateOf(false) }
 
+    // --- НОВЫЕ ПЕРЕМЕННЫЕ ДЛЯ МОДЕЛИ ---
+    val modelTestState by viewModel.modelTestState.collectAsStateWithLifecycle()
+    val modelTestError by viewModel.modelTestError.collectAsStateWithLifecycle()
+    
+    var customModelInput by rememberSaveable { mutableStateOf("") }
+    var selectedDropdownModel by rememberSaveable { mutableStateOf(s.model) }
+    
+    val PREDEFINED_MODELS = listOf(
+        "gemini-3.1-flash-live-preview",
+        "gemini-2.0-flash-exp",
+        "gemini-2.0-pro-exp"
+    )
+    // -----------------------------------
+
     Scaffold(
         topBar = {
             TopAppBar(
@@ -227,6 +246,82 @@ fun SettingsScreen(
                     checked = s.autoRotateKeys,
                     onChange = { v -> viewModel.update { copy(autoRotateKeys = v) } }
                 )
+
+                // ─── 1.5. MODEL (ВЫБОР И ПРОВЕРКА) ───
+                SectionTitle("Модель Gemini")
+                
+                DropdownSetting(
+                    label = "Стандартные модели",
+                    value = selectedDropdownModel,
+                    options = PREDEFINED_MODELS.map { it to it },
+                    onSelect = { 
+                        selectedDropdownModel = it
+                        viewModel.resetModelTestState()
+                    }
+                )
+                
+                OutlinedTextField(
+                    value = customModelInput,
+                    onValueChange = { 
+                        customModelInput = it
+                        viewModel.resetModelTestState()
+                    },
+                    label = { Text("Или введите свою модель руками") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth()
+                )
+                
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Button(
+                        onClick = {
+                            val isCustom = customModelInput.isNotBlank()
+                            val targetModel = if (isCustom) customModelInput.trim() else selectedDropdownModel
+                            
+                            viewModel.testAndApplyModel(targetModel) {
+                                // Коллбэк успешного коннекта
+                                if (!isCustom) {
+                                    // Если выбрали из списка и коннект успешен -> обнуляем поле ручного ввода
+                                    customModelInput = ""
+                                }
+                            }
+                        },
+                        enabled = modelTestState != ModelTestState.TESTING
+                    ) {
+                        if (modelTestState == ModelTestState.TESTING) {
+                            CircularProgressIndicator(
+                                modifier = Modifier.size(18.dp), 
+                                color = MaterialTheme.colorScheme.onPrimary, 
+                                strokeWidth = 2.dp
+                            )
+                            Spacer(Modifier.width(8.dp))
+                            Text("Проверка...")
+                        } else {
+                            Text("ОК (Подключить)")
+                        }
+                    }
+                    
+                    Spacer(Modifier.width(12.dp))
+                    
+                    // Статус проверки
+                    when (modelTestState) {
+                        ModelTestState.SUCCESS -> {
+                            Icon(Icons.Default.CheckCircle, contentDescription = null, tint = Color(0xFF34A853), modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text("Подключено", color = Color(0xFF34A853), fontSize = 14.sp, fontWeight = FontWeight.Medium)
+                        }
+                        ModelTestState.ERROR -> {
+                            Icon(Icons.Default.Error, contentDescription = null, tint = Color(0xFFEA4335), modifier = Modifier.size(20.dp))
+                            Spacer(Modifier.width(4.dp))
+                            Text(modelTestError ?: "Ошибка", color = Color(0xFFEA4335), fontSize = 12.sp, modifier = Modifier.weight(1f), lineHeight = 14.sp)
+                        }
+                        else -> {
+                            Text("Текущая: ${s.model}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
+                        }
+                    }
+                }
 
                 // ─── 2. VOICE ───
                 SectionTitle("Голос")
