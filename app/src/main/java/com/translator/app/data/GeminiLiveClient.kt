@@ -59,7 +59,7 @@ class GeminiLiveClient(
     @Volatile private var webSocket: WebSocket? = null
 
     private val _events = MutableSharedFlow<GeminiEvent>(
-        replay = 0, extraBufferCapacity = 128, onBufferOverflow = BufferOverflow.DROP_OLDEST
+        replay = 0, extraBufferCapacity = 512, onBufferOverflow = BufferOverflow.DROP_OLDEST
     )
     override val events: Flow<GeminiEvent> = _events.asSharedFlow()
 
@@ -316,7 +316,8 @@ class GeminiLiveClient(
     // ════════════════════════════════════════════════════════════
 
     override fun sendAudio(chunk: MicAudioChunk) {
-        if (!isReady) {
+        val ws = webSocket
+        if (!isReady || ws == null) {
             droppedAudioChunks++
             if (droppedAudioChunks % 50L == 0L) {
                 logger.w("Dropped $droppedAudioChunks audio chunks (not ready)")
@@ -329,7 +330,7 @@ class GeminiLiveClient(
             val raw = """{"realtimeInput":{"audio":{"data":"$b64","mimeType":"audio/pcm;rate=${SessionConfig.INPUT_SAMPLE_RATE}"}}}"""
             val logStub = """{"realtimeInput":{"audio":{"data":"<HIDDEN_BASE64_FOR_MEM_SAFETY>","mimeType":"audio/pcm;rate=${SessionConfig.INPUT_SAMPLE_RATE}"}}}"""
             trackSentFrame(logStub)
-            webSocket?.send(raw)
+            ws.send(raw)
         } catch (e: Exception) {
             logger.e("Audio send failed: ${e.message}")
         } finally {
@@ -338,38 +339,45 @@ class GeminiLiveClient(
     }
 
     override fun sendRealtimeText(text: String) {
-        if (!isReady) return
+        val ws = webSocket
+        if (!isReady || ws == null) return
         val raw = buildJsonObject {
             put("realtimeInput", buildJsonObject { put("text", text) })
         }.toString()
-        trackSentFrame(raw); webSocket?.send(raw)
+        trackSentFrame(raw); ws.send(raw)
     }
 
     override fun sendAudioStreamEnd() {
-        if (!isReady) return
+        val ws = webSocket
+        if (!isReady || ws == null) return
         val raw = """{"realtimeInput":{"audioStreamEnd":true}}"""
-        trackSentFrame(raw); webSocket?.send(raw)
+        trackSentFrame(raw); ws.send(raw)
     }
 
     override fun sendActivityStart() {
-        if (!isReady) return
-        webSocket?.send("""{"realtimeInput":{"activityStart":{}}}""")
+        val ws = webSocket
+        if (!isReady || ws == null) return
+        ws.send("""{"realtimeInput":{"activityStart":{}}}""")
     }
 
     override fun sendActivityEnd() {
-        if (!isReady) return
-        webSocket?.send("""{"realtimeInput":{"activityEnd":{}}}""")
+        val ws = webSocket
+        if (!isReady || ws == null) return
+        ws.send("""{"realtimeInput":{"activityEnd":{}}}""")
     }
 
     override fun sendTurnComplete() {
-        if (!isReady) return
+        val ws = webSocket
+        if (!isReady || ws == null) return
         val raw = buildJsonObject {
             put("clientContent", buildJsonObject { put("turnComplete", true) })
         }.toString()
-        trackSentFrame(raw); webSocket?.send(raw)
+        trackSentFrame(raw); ws.send(raw)
     }
 
     override fun sendToolResponse(responses: List<ToolResponse>) {
+        val ws = webSocket
+        if (!isReady || ws == null) return
         val raw = buildJsonObject {
             put("toolResponse", buildJsonObject {
                 put("functionResponses", buildJsonArray {
@@ -383,7 +391,7 @@ class GeminiLiveClient(
                 })
             })
         }.toString()
-        trackSentFrame(raw); webSocket?.send(raw)
+        trackSentFrame(raw); ws.send(raw)
     }
 
     // ════════════════════════════════════════════════════════════
