@@ -278,9 +278,9 @@ class AndroidAudioEngine(
                             }
 
                             val chunk = MicAudioChunk(outBytes, outPos, pool)
-                            // emit — SUSPEND: если consumer медленный, мы ждём,
-                            // не создавая lost-buffer (ключ к отсутствию утечек пула).
-                            _micOutput.emit(chunk)
+                            if (!_micOutput.tryEmit(chunk)) {
+                                chunk.release()
+                            }
                         }
                         read == 0 -> yield()
                         else -> { logger.d("AudioRecord.read=$read — exiting"); break }
