@@ -122,7 +122,7 @@ class GeminiLiveForegroundService : Service() {
         }
         @Suppress("DEPRECATION")
         run {
-            am.mode = AudioManager.MODE_NORMAL
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
             am.isSpeakerphoneOn = true
         }
     }
@@ -134,14 +134,19 @@ class GeminiLiveForegroundService : Service() {
                 runCatching { am.clearCommunicationDevice() }
                 communicationDeviceSet = false
             }
-            am.mode = AudioManager.MODE_NORMAL
+            am.mode = AudioManager.MODE_IN_COMMUNICATION
             return
         }
         @Suppress("DEPRECATION")
-        run { am.isSpeakerphoneOn = false; am.mode = AudioManager.MODE_NORMAL }
+        run { am.isSpeakerphoneOn = false; am.mode = AudioManager.MODE_IN_COMMUNICATION }
     }
 
-    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { /* no-op */ }
+    private val audioFocusListener = AudioManager.OnAudioFocusChangeListener { focusChange ->
+        if (focusChange == AudioManager.AUDIOFOCUS_LOSS || focusChange == AudioManager.AUDIOFOCUS_LOSS_TRANSIENT) {
+            val intent = Intent(this, GeminiLiveForegroundService::class.java).apply { action = ACTION_STOP }
+            startService(intent)
+        }
+    }
 
     @Suppress("DEPRECATION")
     private fun requestAudioFocus() {
