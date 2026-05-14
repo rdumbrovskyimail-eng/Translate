@@ -26,7 +26,11 @@ class SettingsViewModel @Inject constructor(
         // Единственный источник правды — поток DataStore. Первое значение придёт сразу.
         settingsStore.data
             .distinctUntilChanged()
-            .onEach { fromDisk -> _settings.value = fromDisk }
+            .onEach { fromDisk ->
+                _settings.update { current ->
+                    if (current == fromDisk) current else fromDisk
+                }
+            }
             .launchIn(viewModelScope)
     }
 
