@@ -60,7 +60,7 @@ data class SessionConfig(
     val setupTimeoutMs: Long = 10_000L
 ) {
     companion object {
-        // БЕЗ префикса "models/" — формат для WS BidiGenerateContent v1beta.
+        // Короткий id модели. Префикс "models/" добавляется при сборке setup-фрейма.
         const val DEFAULT_MODEL = "gemini-3.1-flash-live-preview"
         const val INPUT_SAMPLE_RATE = 16_000
         const val OUTPUT_SAMPLE_RATE = 24_000
