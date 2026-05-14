@@ -2,26 +2,29 @@ package com.translator.app.presentation.translator
 
 import com.translator.app.data.settings.AppSettings
 import com.translator.app.domain.model.LatencyProfile
+import com.translator.app.domain.model.Languages
 import com.translator.app.domain.model.SessionConfig
 
 object TranslatorSession {
 
     /**
-     * Промпт переводчика. Только конкретные правила, без отрицаний.
-     * Краткость критична — длинный prompt замедляет первый токен.
+     * Промт переводчика. Пары x ↔ y подставляются динамически.
      */
-    const val SYSTEM_INSTRUCTION =
-        "You are a real-time voice translator between Russian and German. " +
-        "Translate input to the target language immediately. " +
-        "Output ONLY the translation. " +
-        "NEVER add conversational filler, greetings, explanations, or meta-commentary. " +
-        "If input is ambiguous, translate literally. " +
-        "Preserve numbers, names, and technical terms exactly as provided."
+    fun buildSystemInstruction(sourceNameEn: String, targetNameEn: String): String =
+        "YOU ARE A PROFESSIONAL TRANSLATOR AND NOTHING MORE. " +
+        "You provide high-quality translations from \"$sourceNameEn\" into \"$targetNameEn\" " +
+        "and from \"$targetNameEn\" into \"$sourceNameEn\". " +
+        "You respond instantly. You ignore other languages. " +
+        "You do not respond to any additional questions from the person, etc. " +
+        "ONLY TRANSLATION."
 
     fun buildConfig(settings: AppSettings): SessionConfig {
         val latencyProfile = runCatching {
             LatencyProfile.valueOf(settings.latencyProfile)
         }.getOrDefault(LatencyProfile.Off)
+
+        val source = Languages.byCode(settings.sourceLanguageCode)
+        val target = Languages.byCode(settings.targetLanguageCode)
 
         return SessionConfig(
             model = settings.model,
@@ -42,7 +45,7 @@ object TranslatorSession {
             activityHandling = settings.activityHandling,
             turnCoverage = settings.turnCoverage,
 
-            systemInstruction = SYSTEM_INSTRUCTION,
+            systemInstruction = buildSystemInstruction(source.nameEn, target.nameEn),
 
             inputTranscription = settings.inputTranscription,
             outputTranscription = settings.outputTranscription,
