@@ -132,7 +132,10 @@ class GeminiLiveForegroundService : Service() {
 
     private fun releaseAudioRouting() {
         val am = audioManager ?: return
-        am.stopBluetoothSco()
+        if (bluetoothScoActive) {
+            am.stopBluetoothSco()
+            bluetoothScoActive = false
+        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
             if (communicationDeviceSet) {
                 runCatching { am.clearCommunicationDevice() }
@@ -152,17 +155,28 @@ class GeminiLiveForegroundService : Service() {
         }
     }
 
-    @Suppress("DEPRECATION")
+    private var audioFocusRequest: android.media.AudioFocusRequest? = null
+
     private fun requestAudioFocus() {
-        audioManager?.requestAudioFocus(
-            audioFocusListener, AudioManager.STREAM_VOICE_CALL,
-            AudioManager.AUDIOFOCUS_GAIN_TRANSIENT
-        )
+        val am = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest = android.media.AudioFocusRequest.Builder(AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+                .setOnAudioFocusChangeListener(audioFocusListener)
+                .build().also { am.requestAudioFocus(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            am.requestAudioFocus(audioFocusListener, AudioManager.STREAM_VOICE_CALL, AudioManager.AUDIOFOCUS_GAIN_TRANSIENT)
+        }
     }
 
-    @Suppress("DEPRECATION")
     private fun releaseAudioFocus() {
-        audioManager?.abandonAudioFocus(audioFocusListener)
+        val am = audioManager ?: return
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            audioFocusRequest?.let { am.abandonAudioFocusRequest(it) }
+        } else {
+            @Suppress("DEPRECATION")
+            am.abandonAudioFocus(audioFocusListener)
+        }
     }
 
     private fun buildNotification(): Notification {
