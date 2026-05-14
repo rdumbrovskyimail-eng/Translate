@@ -14,11 +14,9 @@ import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.translator.app.presentation.navigation.AppNavGraph
-import com.translator.app.presentation.settings.SettingsViewModel
-import com.translator.app.presentation.theme.AppThemeId
 import com.translator.app.presentation.theme.GeminiLiveTheme
+import com.translator.app.presentation.theme.ThemeViewModel
 import com.translator.app.presentation.translator.reveal.LocalMessageReveal
-import com.translator.app.presentation.translator.reveal.MessageRevealId
 import dagger.hilt.android.AndroidEntryPoint
 
 @AndroidEntryPoint
@@ -40,11 +38,9 @@ class MainActivity : ComponentActivity() {
         }
 
         setContent {
-            val settingsVm: SettingsViewModel = hiltViewModel()
-            val settings by settingsVm.settings.collectAsStateWithLifecycle()
-
-            val themeId = AppThemeId.fromName(settings.themeId)
-            val revealId = MessageRevealId.fromName(settings.messageRevealId)
+            val themeVm: ThemeViewModel = hiltViewModel()
+            val themeId by themeVm.themeId.collectAsStateWithLifecycle()
+            val revealId by themeVm.revealId.collectAsStateWithLifecycle()
 
             GeminiLiveTheme(themeId = themeId) {
                 CompositionLocalProvider(LocalMessageReveal provides revealId) {
