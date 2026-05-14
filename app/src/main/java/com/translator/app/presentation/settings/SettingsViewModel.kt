@@ -86,7 +86,8 @@ class SettingsViewModel @Inject constructor(
             val ws = client.newWebSocket(request, object : WebSocketListener() {
                 override fun onOpen(ws: WebSocket, response: Response) {
                     // Отправляем минимальный setup frame с проверяемой моделью
-                    val setupJson = """{"setup": {"model": "$modelName"}}"""
+                    val normalized = if (modelName.startsWith("models/")) modelName else "models/$modelName"
+                    val setupJson = """{"setup": {"model": "$normalized"}}"""
                     ws.send(setupJson)
                 }
 
