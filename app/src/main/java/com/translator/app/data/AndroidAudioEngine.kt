@@ -218,7 +218,9 @@ class AndroidAudioEngine(
         logger.d("Recording started rate=$sampleRate src=$usedSource pool=${poolBufSize}B×32")
 
         captureJob = engineScope.launch {
-            val buffer = ShortArray(minBuf)
+            // Строго 40 мс аудио (16000 Hz * 0.04 sec = 640 сэмплов)
+            val chunkSize = 640
+            val buffer = ShortArray(chunkSize)
 
             // Программный мягкий AGC поверх системного.
             var rollingPeak = 4000f
