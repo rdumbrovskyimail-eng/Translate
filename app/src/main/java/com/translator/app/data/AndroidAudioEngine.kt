@@ -36,6 +36,24 @@ class AndroidAudioEngine(
     private val logger: AppLogger
 ) : AudioEngine {
 
+    companion object {
+        // 40ms audio chunk @ 16kHz mono = 640 samples
+        private const val CAPTURE_CHUNK_SAMPLES = 640
+        // AGC параметры
+        private const val AGC_TARGET_PEAK = 18_000f
+        private const val AGC_INITIAL_PEAK = 4000f
+        private const val AGC_ATTACK = 0.4f
+        private const val AGC_RELEASE = 0.015f
+        private const val AGC_MAX_BOOST = 2.0f
+        private const val AGC_MIN_BOOST = 0.8f
+        private const val AGC_NOISE_FLOOR = 800f
+        // Soft gate
+        private const val GATE_LOW = 600f
+        private const val GATE_HIGH = 1200f
+        // Combined gain ceiling
+        private const val GAIN_CEILING = 2.5f
+    }
+
     // ═══ CONFIG ═══
     @Volatile private var playbackQueueCapacity = 256
     @Volatile private var jitterPreBufferChunks = 3
@@ -215,23 +233,8 @@ class AndroidAudioEngine(
         logger.d("Recording started rate=$sampleRate src=$usedSource pool=${poolBufSize}B×32")
 
         captureJob = engineScope.launch {
-            // Строго 40 мс аудио (16000 Hz * 0.04 sec = 640 сэмплов)
-            val chunkSize = 640
-            val buffer = ShortArray(chunkSize)
-
-            // Программный мягкий AGC поверх системного.
-            var rollingPeak = 4000f
-            val targetPeak = 18_000f
-            val agcAttack = 0.4f
-            val agcRelease = 0.015f
-            val agcMaxBoost = 2.0f      // снижено до ×2.0
-            val agcMinBoost = 0.8f
-            val noiseFloor = 800f
-
-            // Мягкий "gate" через коэффициент: до 600 → 0, до 1200 → линейный fade до 1.
-            // НИКАКОГО обнуления буфера — только плавное затухание амплитуды.
-            val gateLow = 600f
-            val gateHigh = 1200f
+            val buffer = ShortArray(CAPTURE_CHUNK_SAMPLES)
+            var rollingPeak = AGC_INITIAL_PEAK
 
             try {
                 while (isActive && isCapturing) {
@@ -247,20 +250,18 @@ class AndroidAudioEngine(
                             val localPeak = lp.toFloat()
 
                             rollingPeak = if (localPeak > rollingPeak)
-                                rollingPeak + (localPeak - rollingPeak) * agcAttack
+                                rollingPeak + (localPeak - rollingPeak) * AGC_ATTACK
                             else
-                                rollingPeak - (rollingPeak - localPeak) * agcRelease
-                            if (rollingPeak < noiseFloor) rollingPeak = noiseFloor
+                                rollingPeak - (rollingPeak - localPeak) * AGC_RELEASE
+                            if (rollingPeak < AGC_NOISE_FLOOR) rollingPeak = AGC_NOISE_FLOOR
 
-                            val agcGain = (targetPeak / rollingPeak).coerceIn(agcMinBoost, agcMaxBoost)
-                            // Совместный gain не более 2.5×.
-                            val finalGain = (agcGain * micGain).coerceAtMost(2.5f)
+                            val agcGain = (AGC_TARGET_PEAK / rollingPeak).coerceIn(AGC_MIN_BOOST, AGC_MAX_BOOST)
+                            val finalGain = (agcGain * micGain).coerceAtMost(GAIN_CEILING)
 
-                            // Плавный fade-out вместо noise gate: коэффициент 0..1 по интерполяции.
                             val gateFactor = when {
-                                localPeak <= gateLow -> 0f
-                                localPeak >= gateHigh -> 1f
-                                else -> (localPeak - gateLow) / (gateHigh - gateLow)
+                                localPeak <= GATE_LOW -> 0f
+                                localPeak >= GATE_HIGH -> 1f
+                                else -> (localPeak - GATE_LOW) / (GATE_HIGH - GATE_LOW)
                             }
                             val totalGain = finalGain * gateFactor
 
