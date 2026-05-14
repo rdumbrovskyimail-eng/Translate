@@ -14,9 +14,7 @@ data class AppSettings(
     val autoRotateKeys: Boolean = false,
 
     // ═══════════════════ 2. MODEL ═══════════════════
-    // ВАЖНО: для WS BidiGenerateContent v1beta модель ОБЯЗАТЕЛЬНО шлётся
-    // в формате resource-name "models/{id}". В этом поле храним короткий id,
-    // префикс добавляется в GeminiLiveClient.buildFullSetup().
+    // Короткий id модели. Префикс "models/" добавляется в GeminiLiveClient.buildFullSetup().
     val model: String = "gemini-3.1-flash-live-preview",
 
     // Translator-режим: низкая temperature для детерминированного перевода.
