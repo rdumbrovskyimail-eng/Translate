@@ -36,4 +36,5 @@
 
     <!-- Ripple -->
     <color name="ripple_subtle">#15FFFFFF</color>
+    <color name="ic_launcher_background">#FF0F1114</color>
 </resources>
