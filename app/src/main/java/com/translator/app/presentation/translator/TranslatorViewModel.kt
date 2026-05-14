@@ -260,6 +260,7 @@ class TranslatorViewModel @Inject constructor(
                         runCatching { audioEngine.flushPlayback() }
                         _state.update { it.copy(isAiSpeaking = false) }
                         hasModelOutputThisTurn.set(false)
+                        lastSeenTurnId.set(-1L)
                         stuckTurnWatchdogJob?.cancel()
                         finalizeOpenPair()
                     }
@@ -267,6 +268,7 @@ class TranslatorViewModel @Inject constructor(
                         audioEngine.onTurnComplete()
                         _state.update { it.copy(isAiSpeaking = false) }
                         hasModelOutputThisTurn.set(false)
+                        lastSeenTurnId.set(-1L)
                         stuckTurnWatchdogJob?.cancel()
                         finalizeOpenPair()
                     }
@@ -382,7 +384,7 @@ class TranslatorViewModel @Inject constructor(
         }
         val baseDelay = cachedSettings.reconnectBaseDelayMs
         val maxDelay = cachedSettings.reconnectMaxDelayMs
-        val delayMs = (baseDelay * (1L shl attempts.toInt())).coerceAtMost(maxDelay)
+        val delayMs = (baseDelay * (1L shl minOf(attempts.toInt(), 30))).coerceAtMost(maxDelay)
         reconnectAttempt.incrementAndGet()
 
         _state.update { it.copy(connectionStatus = ConnectionStatus.Reconnecting) }
