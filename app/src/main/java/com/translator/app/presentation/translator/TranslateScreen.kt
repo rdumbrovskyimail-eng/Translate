@@ -499,7 +499,10 @@ private fun BottomControlPanel(
         horizontalAlignment = Alignment.CenterHorizontally
     ) {
         // Слот анимации: для GEM — большое поле 320dp, для остальных тем — 150dp
-        val animSlotHeight = if (palette.id == AppThemeId.GEM) 320.dp else 150.dp
+        val config = androidx.compose.ui.platform.LocalConfiguration.current
+        val animSlotHeight = if (palette.id == AppThemeId.GEM) {
+            androidx.compose.ui.unit.min(320.dp, (config.screenHeightDp * 0.38f).dp)
+        } else 150.dp
         Box(
             modifier = Modifier.fillMaxWidth().height(animSlotHeight),
             contentAlignment = Alignment.Center
@@ -577,9 +580,11 @@ private fun MicButton(palette: AppPalette, isActive: Boolean, onClick: () -> Uni
             modifier = Modifier
                 .size(92.dp)
                 .scale(haloScale)
-                .clip(CircleShape)
-                .blur(radius = 14.dp)
-                .background(color.copy(alpha = haloAlpha))
+                .background(
+                    Brush.radialGradient(
+                        colors = listOf(color.copy(alpha = haloAlpha), Color.Transparent)
+                    )
+                )
         )
         // Solid halo ring (visible without blur for accent)
         Box(
