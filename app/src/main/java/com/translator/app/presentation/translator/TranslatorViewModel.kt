@@ -1,24 +1,3 @@
-// ═══════════════════════════════════════════════════════════
-// ПОЛНАЯ ЗАМЕНА
-// Путь: app/src/main/java/com/translator/app/presentation/translator/TranslatorViewModel.kt
-//
-// ВОЗВРАЩЕНО ИЗ LearnCoreViewModel:
-//   [+] Reconnect с экспоненциальным backoff
-//   [+] Авто-ротация API ключей при rate-limit
-//   [+] Запуск/остановка GeminiLiveForegroundService через
-//       startForegroundService (Android 8+ требует именно его для FGS)
-//   [+] Передача всех настроек в AudioEngine
-//   [+] Логирование RAW WS-кадров (logRawWebSocketFrames)
-//   [+] Watchdog зависшего ответа модели (5000ms, как для translator)
-//   [+] Авто-старт микрофона через 150ms после SetupComplete,
-//       но ТОЛЬКО если RECORD_AUDIO разрешен (иначе ждём действия пользователя)
-//   [+] Interrupted делает audioEngine.flushPlayback() (мгновенный сброс
-//       audio buffer при перебивании)
-//
-// ПРОМПТ 12:
-//   [+] Обработка SessionHandleUpdate и GoAway в observeGeminiEvents()
-//   [+] connectInternal() передаёт sessionHandle для transparent reconnect
-// ═══════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator
 
 import android.Manifest
@@ -30,6 +9,7 @@ import androidx.datastore.core.DataStore
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import com.translator.app.GeminiLiveForegroundService
+import com.translator.app.data.NetworkMonitor
 import com.translator.app.data.settings.AppSettings
 import com.translator.app.domain.AudioEngine
 import com.translator.app.domain.LiveClient
@@ -41,8 +21,13 @@ import kotlinx.coroutines.Job
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.*
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
+import kotlinx.coroutines.withTimeoutOrNull
+import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
+import java.util.concurrent.atomic.AtomicReference
 import javax.inject.Inject
 
 enum class ConnectionStatus { Disconnected, Connecting, Reconnecting, Ready, Recording }
@@ -63,6 +48,7 @@ class TranslatorViewModel @Inject constructor(
     @ApplicationContext private val appContext: Context,
     private val liveClient: LiveClient,
     private val audioEngine: AudioEngine,
+    private val networkMonitor: NetworkMonitor,
     private val settingsStore: DataStore<AppSettings>,
     private val logger: AppLogger
 ) : ViewModel() {
@@ -74,12 +60,16 @@ class TranslatorViewModel @Inject constructor(
     private var micJob: Job? = null
     private var stuckTurnWatchdogJob: Job? = null
     private var reconnectJob: Job? = null
-    private var reconnectAttempt: Int = 0
+    private var networkJob: Job? = null
+
+    private val reconnectAttempt = AtomicLong(0L)
 
     @Volatile private var nextPairId: Long = 1L
     @Volatile private var currentOpenPairId: Long? = null
-    @Volatile private var lastAiAudioChunkAtMs: Long = 0L
-    @Volatile private var hasModelOutputThisTurn: Boolean = false
+
+    private val lastAiAudioChunkAtMs = AtomicLong(0L)
+    private val hasModelOutputThisTurn = AtomicBoolean(false)
+    private val lastSeenTurnId = AtomicLong(-1L)
 
     @Volatile private var cachedSettings: AppSettings = AppSettings()
     @Volatile private var activeApiKey: String = ""
@@ -87,9 +77,13 @@ class TranslatorViewModel @Inject constructor(
 
     private val pairMutex = Mutex()
 
+    // Был ли потерян интернет — для немедленного реконнекта при восстановлении.
+    private val networkLost = AtomicBoolean(false)
+
     init {
         viewModelScope.launch { audioEngine.initPlayback() }
         observeGeminiEvents()
+        observeNetwork()
     }
 
     private fun hasMicPermission(): Boolean =
@@ -97,12 +91,9 @@ class TranslatorViewModel @Inject constructor(
             appContext, Manifest.permission.RECORD_AUDIO
         ) == PackageManager.PERMISSION_GRANTED
 
-    fun toggleMic() {
-        if (_state.value.isMicActive) stopMic() else startMic()
-    }
+    fun toggleMic() { if (_state.value.isMicActive) stopMic() else startMic() }
 
     fun startSession() {
-        // Защита от двойного запуска (LaunchedEffect + повторная навигация)
         if (_state.value.connectionStatus != ConnectionStatus.Disconnected) {
             logger.d("startSession ignored — already ${_state.value.connectionStatus}")
             return
@@ -110,20 +101,17 @@ class TranslatorViewModel @Inject constructor(
         viewModelScope.launch {
             val settings = settingsStore.data.first()
             cachedSettings = settings
-
             if (settings.apiKey.isEmpty()) {
                 _state.update { it.copy(error = "API ключ не задан") }
                 return@launch
             }
             activeApiKey = settings.apiKey
-
             _state.update {
                 it.copy(connectionStatus = ConnectionStatus.Connecting, pairs = emptyList(), error = null)
             }
             currentOpenPairId = null
-            reconnectAttempt = 0
+            reconnectAttempt.set(0L)
 
-            // ─── Применить ВСЕ аудио-настройки ───
             audioEngine.updateJitterConfig(
                 preBufferChunks = settings.jitterPreBufferChunks,
                 timeoutMs = settings.jitterTimeoutMs,
@@ -135,19 +123,14 @@ class TranslatorViewModel @Inject constructor(
             audioEngine.setPlaybackBoost(settings.playbackBoost)
             audioEngine.setUseAec(settings.useAec)
 
-            // ─── Запустить FGS для стабильности в фоне ───
-            // КРИТИЧНО: на Android 8+ FGS должен стартоваться через
-            // startForegroundService, а не startService. Иначе на Android 12+
-            // отбираются права на VOICE_COMMUNICATION → AudioRecord UOE.
             startForegroundServiceSafe(settings.forceSpeakerOutput)
-
             connectInternal()
         }
     }
 
     private fun startForegroundServiceSafe(forceSpeaker: Boolean) {
         if (!hasMicPermission()) {
-            logger.w("FGS not started — RECORD_AUDIO not granted yet")
+            logger.w("FGS not started — RECORD_AUDIO not granted")
             return
         }
         runCatching {
@@ -158,11 +141,7 @@ class TranslatorViewModel @Inject constructor(
                 appContext.startService(intent)
             }
             fgsStarted = true
-            logger.d("FGS started (forceSpeaker=$forceSpeaker)")
-        }.onFailure {
-            fgsStarted = false
-            logger.e("FGS start failed: ${it.javaClass.simpleName}: ${it.message}")
-        }
+        }.onFailure { fgsStarted = false; logger.e("FGS start failed: ${it.message}") }
     }
 
     private fun stopForegroundServiceSafe() {
@@ -175,7 +154,6 @@ class TranslatorViewModel @Inject constructor(
 
     private suspend fun connectInternal() {
         val baseConfig = TranslatorSession.buildConfig(cachedSettings)
-        // Передаём sessionHandle если он есть — для transparent reconnect
         val config = baseConfig.copy(sessionHandle = liveClient.sessionHandle)
         runCatching {
             liveClient.connect(activeApiKey, config, logRaw = cachedSettings.logRawWebSocketFrames)
@@ -187,14 +165,12 @@ class TranslatorViewModel @Inject constructor(
 
     fun stopSession() {
         viewModelScope.launch {
-            reconnectJob?.cancel()
-            reconnectJob = null
-            reconnectAttempt = 0
+            reconnectJob?.cancel(); reconnectJob = null
+            reconnectAttempt.set(0L)
 
-            micJob?.cancel()
+            micJob?.cancel(); micJob = null
             audioEngine.stopCapture()
             liveClient.disconnect()
-
             stopForegroundServiceSafe()
 
             _state.update {
@@ -207,48 +183,34 @@ class TranslatorViewModel @Inject constructor(
         }
     }
 
-    /**
-     * Вызывается из UI после того, как RECORD_AUDIO permission получен.
-     * Если FGS ещё не запустился (потому что permission не было) — стартуем сейчас.
-     */
     fun onMicPermissionGranted() {
-        if (!fgsStarted) {
-            startForegroundServiceSafe(cachedSettings.forceSpeakerOutput)
-        }
+        if (!fgsStarted) startForegroundServiceSafe(cachedSettings.forceSpeakerOutput)
         if (!_state.value.isMicActive &&
             (_state.value.connectionStatus == ConnectionStatus.Ready ||
              _state.value.connectionStatus == ConnectionStatus.Recording)
-        ) {
-            startMic()
-        }
+        ) startMic()
     }
 
     private fun startMic() {
-        if (!hasMicPermission()) {
-            logger.w("startMic skipped — no RECORD_AUDIO permission")
-            return
-        }
-        if (_state.value.isMicActive) {
-            logger.d("startMic skipped — already active")
-            return
-        }
-        // Если FGS ещё не стартовал — стартуем сейчас (после permission grant)
+        if (!hasMicPermission()) { logger.w("startMic — no permission"); return }
+        if (_state.value.isMicActive) return
         if (!fgsStarted) startForegroundServiceSafe(cachedSettings.forceSpeakerOutput)
 
         _state.update { it.copy(isMicActive = true, connectionStatus = ConnectionStatus.Recording) }
         micJob = viewModelScope.launch {
-            launch { audioEngine.micOutput.collect { chunk -> liveClient.sendAudio(chunk) } }
+            val collectJob = launch {
+                audioEngine.micOutput.collect { chunk -> liveClient.sendAudio(chunk) }
+            }
             audioEngine.startCapture()
+            collectJob.join()
         }
     }
 
     private fun stopMic() {
-        micJob?.cancel()
+        micJob?.cancel(); micJob = null
         viewModelScope.launch {
             audioEngine.stopCapture()
-            if (cachedSettings.sendAudioStreamEnd) {
-                liveClient.sendAudioStreamEnd()
-            }
+            if (cachedSettings.sendAudioStreamEnd) liveClient.sendAudioStreamEnd()
             _state.update { it.copy(isMicActive = false, connectionStatus = ConnectionStatus.Ready) }
         }
     }
@@ -258,25 +220,23 @@ class TranslatorViewModel @Inject constructor(
             liveClient.events.collect { event ->
                 when (event) {
                     is GeminiEvent.SetupComplete -> {
-                        reconnectAttempt = 0
+                        reconnectAttempt.set(0L)
                         _state.update { it.copy(connectionStatus = ConnectionStatus.Ready) }
-                        // Translator UX: мгновенный старт микрофона через 150ms,
-                        // но ТОЛЬКО если RECORD_AUDIO уже разрешён.
                         viewModelScope.launch {
                             delay(150)
                             if (hasMicPermission() &&
                                 !_state.value.isMicActive &&
                                 _state.value.connectionStatus == ConnectionStatus.Ready
-                            ) {
-                                startMic()
-                            } else if (!hasMicPermission()) {
-                                logger.d("Auto-start mic deferred — waiting for RECORD_AUDIO permission")
-                            }
+                            ) startMic()
                         }
                     }
                     is GeminiEvent.AudioChunk -> {
-                        lastAiAudioChunkAtMs = System.currentTimeMillis()
-                        hasModelOutputThisTurn = true
+                        // Отсекаем stale-чанки старых ходов.
+                        if (event.turnId < lastSeenTurnId.get()) return@collect
+                        lastSeenTurnId.set(event.turnId)
+
+                        lastAiAudioChunkAtMs.set(System.currentTimeMillis())
+                        hasModelOutputThisTurn.set(true)
                         _state.update { it.copy(isAiSpeaking = true) }
                         audioEngine.enqueuePlayback(event.pcmData)
                         startStuckTurnWatchdog()
@@ -284,56 +244,38 @@ class TranslatorViewModel @Inject constructor(
                     is GeminiEvent.InputTranscript -> {
                         val pairId = currentOpenPairId ?: openNewPair()
                         updatePair(pairId) {
-                            val newText = it.originalText + event.text
-                            it.copy(originalText = newText, originalLang = detectLang(newText))
+                            val nt = it.originalText + event.text
+                            it.copy(originalText = nt, originalLang = detectLang(nt))
                         }
                     }
                     is GeminiEvent.OutputTranscript -> {
                         val pairId = currentOpenPairId ?: openNewPair()
                         updatePair(pairId) {
-                            val newText = it.translationText + event.text
-                            it.copy(translationText = newText, translationLang = detectLang(newText))
+                            val nt = it.translationText + event.text
+                            it.copy(translationText = nt, translationLang = detectLang(nt))
                         }
-                        hasModelOutputThisTurn = true
+                        hasModelOutputThisTurn.set(true)
                         startStuckTurnWatchdog()
                     }
                     is GeminiEvent.Interrupted -> {
                         runCatching { audioEngine.flushPlayback() }
                         _state.update { it.copy(isAiSpeaking = false) }
-                        hasModelOutputThisTurn = false
+                        hasModelOutputThisTurn.set(false)
                         stuckTurnWatchdogJob?.cancel()
-
-                        currentOpenPairId?.let { pairId ->
-                            updatePair(pairId) {
-                                it.copy(
-                                    originalIsFinal = true, translationIsFinal = true,
-                                    originalIsRefined = true, translationIsRefined = true
-                                )
-                            }
-                        }
-                        currentOpenPairId = null
+                        finalizeOpenPair()
                     }
                     is GeminiEvent.TurnComplete -> {
                         audioEngine.onTurnComplete()
                         _state.update { it.copy(isAiSpeaking = false) }
-                        hasModelOutputThisTurn = false
+                        hasModelOutputThisTurn.set(false)
                         stuckTurnWatchdogJob?.cancel()
-
-                        currentOpenPairId?.let { pairId ->
-                            updatePair(pairId) {
-                                it.copy(
-                                    originalIsFinal = true, translationIsFinal = true,
-                                    originalIsRefined = true, translationIsRefined = true
-                                )
-                            }
-                        }
-                        currentOpenPairId = null
+                        finalizeOpenPair()
                     }
                     is GeminiEvent.GenerationComplete -> {
                         _state.update { it.copy(isAiSpeaking = false) }
                         stuckTurnWatchdogJob?.cancel()
-                        currentOpenPairId?.let { pairId ->
-                            updatePair(pairId) { it.copy(translationIsFinal = true) }
+                        currentOpenPairId?.let { id ->
+                            updatePair(id) { it.copy(translationIsFinal = true) }
                         }
                     }
                     is GeminiEvent.UsageMetadata -> {
@@ -347,17 +289,13 @@ class TranslatorViewModel @Inject constructor(
                             }
                         }
                     }
-                    is GeminiEvent.SessionHandleUpdate -> {
-                        // Запоминаем handle для возможного reconnect.
-                        // liveClient.sessionHandle уже обновлён внутри клиента.
-                        logger.d("Session handle updated, resumable=${event.resumable}")
-                    }
-                    is GeminiEvent.GoAway -> {
-                        logger.w("Server will close soon: timeLeft=${event.timeLeft}")
-                        // На GoAway мы НЕ инициируем reconnect преждевременно —
-                        // ждём Disconnected, иначе двойное подключение.
-                    }
+                    is GeminiEvent.SessionHandleUpdate -> { /* handle stored inside client */ }
+                    is GeminiEvent.GoAway -> { logger.w("GoAway: ${event.timeLeft}") }
                     is GeminiEvent.Disconnected -> {
+                        // Закрываем mic-петлю чтобы не было fantom-эмиссий.
+                        micJob?.cancel(); micJob = null
+                        audioEngine.stopCapture()
+
                         _state.update {
                             it.copy(
                                 connectionStatus = ConnectionStatus.Disconnected,
@@ -365,21 +303,19 @@ class TranslatorViewModel @Inject constructor(
                                 isAiSpeaking = false
                             )
                         }
-                        audioEngine.stopCapture()
-                        if (event.code != 1000 && event.code != 1001) {
-                            scheduleReconnect()
-                        }
+                        if (event.code != 1000 && event.code != 1001) scheduleReconnect()
                     }
                     is GeminiEvent.ConnectionError -> {
                         val msg = event.message
-                        val isRateLimit = msg.contains("429") || msg.contains("rate", ignoreCase = true)
-                        if (isRateLimit && cachedSettings.autoRotateKeys &&
+                        val isRate = msg.contains("429") || msg.contains("rate", ignoreCase = true)
+                        if (isRate && cachedSettings.autoRotateKeys &&
                             cachedSettings.apiKeyBackup.isNotEmpty()
                         ) {
                             activeApiKey = if (activeApiKey == cachedSettings.apiKey)
                                 cachedSettings.apiKeyBackup else cachedSettings.apiKey
-                            logger.d("Rate limit — rotating to backup key")
+                            logger.d("Rotated to backup key")
                         }
+                        micJob?.cancel(); micJob = null
                         _state.update {
                             it.copy(
                                 connectionStatus = ConnectionStatus.Disconnected,
@@ -397,24 +333,70 @@ class TranslatorViewModel @Inject constructor(
         }
     }
 
+    private fun observeNetwork() {
+        networkJob?.cancel()
+        networkJob = viewModelScope.launch {
+            networkMonitor.isConnected.collect { connected ->
+                if (!connected) {
+                    networkLost.set(true)
+                    logger.w("Network lost")
+                    return@collect
+                }
+                // Восстановление сети — если мы были в Disconnected, мгновенный реконнект.
+                if (networkLost.compareAndSet(true, false)) {
+                    logger.d("Network restored — fast reconnect")
+                    if (_state.value.connectionStatus == ConnectionStatus.Disconnected &&
+                        activeApiKey.isNotEmpty()) {
+                        reconnectJob?.cancel()
+                        reconnectAttempt.set(0L)
+                        _state.update { it.copy(connectionStatus = ConnectionStatus.Reconnecting) }
+                        reconnectJob = launch { connectInternal() }
+                    }
+                }
+            }
+        }
+    }
+
+    private suspend fun finalizeOpenPair() {
+        pairMutex.withLock {
+            val openId = currentOpenPairId ?: return@withLock
+            _state.update { s ->
+                val idx = s.pairs.indexOfFirst { it.id == openId }
+                if (idx < 0) return@update s
+                val finalized = s.pairs[idx].copy(
+                    originalIsFinal = true, translationIsFinal = true,
+                    originalIsRefined = true, translationIsRefined = true
+                )
+                s.copy(pairs = s.pairs.toMutableList().apply { set(idx, finalized) })
+            }
+            currentOpenPairId = null
+        }
+    }
+
     private fun scheduleReconnect() {
+        val attempts = reconnectAttempt.get()
         val maxAttempts = cachedSettings.maxReconnectAttempts
-        if (reconnectAttempt >= maxAttempts) {
-            logger.e("Max reconnect attempts ($maxAttempts) reached — giving up")
-            reconnectAttempt = 0
+        if (attempts >= maxAttempts) {
+            logger.e("Max reconnect attempts ($maxAttempts) reached")
+            reconnectAttempt.set(0L)
             return
         }
         val baseDelay = cachedSettings.reconnectBaseDelayMs
         val maxDelay = cachedSettings.reconnectMaxDelayMs
-        val delayMs = (baseDelay * (1L shl reconnectAttempt)).coerceAtMost(maxDelay)
+        val delayMs = (baseDelay * (1L shl attempts.toInt())).coerceAtMost(maxDelay)
+        reconnectAttempt.incrementAndGet()
 
-        reconnectAttempt++
         _state.update { it.copy(connectionStatus = ConnectionStatus.Reconnecting) }
-        logger.d("Reconnect attempt #$reconnectAttempt in ${delayMs}ms")
+        logger.d("Reconnect #${attempts + 1} in ${delayMs}ms")
 
         reconnectJob?.cancel()
         reconnectJob = viewModelScope.launch {
             delay(delayMs)
+            // Не реконнектимся если сеть ещё лежит — networkMonitor сам триггернёт когда восстановится.
+            if (networkLost.get()) {
+                logger.d("Reconnect deferred — no network yet")
+                return@launch
+            }
             connectInternal()
         }
     }
@@ -431,58 +413,50 @@ class TranslatorViewModel @Inject constructor(
             _state.update { s ->
                 val idx = s.pairs.indexOfFirst { it.id == id }
                 if (idx < 0) return@update s
-                val newList = s.pairs.toMutableList().apply { set(idx, transform(s.pairs[idx])) }
-                s.copy(pairs = newList)
+                val nl = s.pairs.toMutableList().apply { set(idx, transform(s.pairs[idx])) }
+                s.copy(pairs = nl)
             }
         }
 
     private fun detectLang(text: String): String {
         if (text.isBlank()) return ""
-        val hasCyrillic = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
-        return if (hasCyrillic) "RU" else "DE"
+        val hasCyr = text.any { it in 'а'..'я' || it in 'А'..'Я' || it == 'ё' || it == 'Ё' }
+        return if (hasCyr) "RU" else "DE"
     }
 
     private fun startStuckTurnWatchdog() {
         stuckTurnWatchdogJob?.cancel()
         stuckTurnWatchdogJob = viewModelScope.launch {
             delay(5000)
-
             val now = System.currentTimeMillis()
-            val sinceLastAudio = now - lastAiAudioChunkAtMs
-            if (lastAiAudioChunkAtMs > 0L && sinceLastAudio < 2_000L) {
-                logger.d("Stuck-turn watchdog: model still playing (${sinceLastAudio}ms ago), restarting")
-                startStuckTurnWatchdog()
-                return@launch
+            val lastT = lastAiAudioChunkAtMs.get()
+            val sinceLast = now - lastT
+            if (lastT > 0L && sinceLast < 2_000L) {
+                startStuckTurnWatchdog(); return@launch
             }
-
-            if (hasModelOutputThisTurn) {
-                logger.w("⚠ STUCK_TURN_DETECTED — force-finalizing")
+            if (hasModelOutputThisTurn.get()) {
+                logger.w("⚠ STUCK_TURN — force finalize")
                 runCatching { audioEngine.flushPlayback() }
                 runCatching { audioEngine.onTurnComplete() }
-                hasModelOutputThisTurn = false
-                lastAiAudioChunkAtMs = 0L
+                hasModelOutputThisTurn.set(false)
+                lastAiAudioChunkAtMs.set(0L)
                 _state.update { it.copy(isAiSpeaking = false) }
-                pairMutex.withLock {
-                    val openId = currentOpenPairId
-                    if (openId != null) {
-                        _state.update { s ->
-                            val idx = s.pairs.indexOfFirst { it.id == openId }
-                            if (idx < 0) return@update s
-                            val finalized = s.pairs[idx].copy(
-                                originalIsFinal = true, translationIsFinal = true,
-                                originalIsRefined = true, translationIsRefined = true
-                            )
-                            s.copy(pairs = s.pairs.toMutableList().apply { set(idx, finalized) })
-                        }
-                        currentOpenPairId = null
-                    }
-                }
+                finalizeOpenPair()
             }
         }
     }
 
     override fun onCleared() {
         super.onCleared()
-        stopSession()
+        // Синхронный shutdown — viewModelScope уже cancel'нут, нельзя через launch.
+        runCatching {
+            runBlocking {
+                withTimeoutOrNull(1000L) {
+                    audioEngine.stopCapture()
+                    liveClient.disconnect()
+                }
+            }
+        }
+        stopForegroundServiceSafe()
     }
 }
