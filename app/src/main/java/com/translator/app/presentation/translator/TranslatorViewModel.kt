@@ -641,7 +641,7 @@ class TranslatorViewModel @Inject constructor(
     private fun startStuckTurnWatchdog() {
         stuckTurnWatchdogJob?.cancel()
         stuckTurnWatchdogJob = viewModelScope.launch {
-            delay(3000)
+            delay(5000)
             val now = System.currentTimeMillis()
             val lastT = lastAiAudioChunkAtMs.get()
             val sinceLast = now - lastT
