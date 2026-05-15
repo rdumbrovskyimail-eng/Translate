@@ -242,18 +242,7 @@ private fun TopBar(
                 tint = palette.textPrimary
             )
         }
-        IconButton(onClick = {
-            val log = viewModel.exportTranscriptLog()
-            val cm = context.getSystemService(android.content.Context.CLIPBOARD_SERVICE) as android.content.ClipboardManager
-            cm.setPrimaryClip(android.content.ClipData.newPlainText("transcript", log))
-            android.widget.Toast.makeText(context, "Транскрипт скопирован", android.widget.Toast.LENGTH_SHORT).show()
-        }) {
-            Icon(
-                Icons.Filled.Subtitles,
-                contentDescription = "Экспорт транскрипта",
-                tint = palette.textPrimary
-            )
-        }
+
         IconButton(onClick = onSettings) {
             Icon(
                 Icons.Filled.Settings,
