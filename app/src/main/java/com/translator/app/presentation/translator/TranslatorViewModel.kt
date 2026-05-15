@@ -49,8 +49,27 @@ data class TranslatorState(
     val responseTokens: Int = 0,
     val totalTokens: Int = 0,
     val sourceLanguage: Language = Languages.DEFAULT_SOURCE,
-    val targetLanguage: Language = Languages.DEFAULT_TARGET
+    val targetLanguage: Language = Languages.DEFAULT_TARGET,
+    val lastInputTranscript: String = "",
+    val lastOutputTranscript: String = "",
+    val transcriptLog: List<TranscriptEntry> = emptyList()
 )
+
+data class TranscriptEntry(
+    val id: Long = System.currentTimeMillis(),
+    val direction: TranscriptDirection,
+    val text: String,
+    val timestampMs: Long = System.currentTimeMillis()
+) {
+    fun formatted(): String {
+        val arrow = if (direction == TranscriptDirection.INPUT) "🎙 IN " else "🔊 OUT"
+        val time = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.ROOT)
+            .format(java.util.Date(timestampMs))
+        return "[$time] $arrow | $text"
+    }
+}
+
+enum class TranscriptDirection { INPUT, OUTPUT }
 
 @HiltViewModel
 class TranslatorViewModel @Inject constructor(
@@ -391,6 +410,7 @@ class TranslatorViewModel @Inject constructor(
                         startStuckTurnWatchdog()
                     }
                     is GeminiEvent.InputTranscript -> {
+                        _state.update { it.copy(lastInputTranscript = event.text, transcriptLog = it.transcriptLog + TranscriptEntry(direction = TranscriptDirection.INPUT, text = event.text)) }
                         val pairId = currentOpenPairId ?: openNewPair()
                         val src = _state.value.sourceLanguage
                         val tgt = _state.value.targetLanguage
@@ -401,6 +421,7 @@ class TranslatorViewModel @Inject constructor(
                         }
                     }
                     is GeminiEvent.OutputTranscript -> {
+                        _state.update { it.copy(lastOutputTranscript = event.text, transcriptLog = it.transcriptLog + TranscriptEntry(direction = TranscriptDirection.OUTPUT, text = event.text)) }
                         val pairId = currentOpenPairId ?: openNewPair()
                         val src = _state.value.sourceLanguage
                         val tgt = _state.value.targetLanguage
