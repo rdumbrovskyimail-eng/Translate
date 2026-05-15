@@ -584,9 +584,13 @@ class TranslatorViewModel @Inject constructor(
         val srcScript = scriptForCode(src.code)
         val tgtScript = scriptForCode(tgt.code)
         val matched = when {
-            script != null && script == srcScript -> src.code
-            script != null && script == tgtScript -> tgt.code
-            else -> src.code
+            script == null -> src.code
+            // Оба языка в одном скрипте (например PL↔DE — оба латиница):
+            // не различаем по символам, считаем что первая транскрипция — source.
+            srcScript == tgtScript -> src.code
+            script == srcScript -> src.code
+            script == tgtScript -> tgt.code
+            else -> src.code  // unknown script → source как fallback
         }
         return matched.uppercase()
     }
