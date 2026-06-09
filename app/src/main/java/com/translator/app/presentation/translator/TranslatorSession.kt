@@ -1,36 +1,40 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Путь: app/src/main/java/com/translator/app/presentation/translator/TranslatorSession.kt
 //
-// ПОЛНАЯ ЗАМЕНА (v4.0 — «насос» + анти-обрезка + анти-эхо)
+// ПОЛНАЯ ЗАМЕНА (v5.0 — анти-обрыв: NO_INTERRUPTION всегда + VAD под длинные фразы)
 //
-// Что и зачем изменено (по результатам реального теста RU↔DE):
+// Что и зачем изменено (диагноз «сказало 2 слова и зависло»):
 //
-//   1) THINKING РЕАЛЬНО ВКЛЮЧЁН (≥ low).
-//      Раньше комментарий обещал Low, но код брал settings.latencyProfile
-//      (по умолчанию "Off") → модель работала без планирования и обрывала
-//      длинные фразы (русский/немецкий глагол уходит в конец — «Я тебя очень
-//      [люблю]»). Теперь профиль принудительно поднимается минимум до Low
-//      (thinkingLevel="low" — ровно то, что рекомендует дока Live API для
-//      аудио-перевода). Более высокий профиль пользователя уважается.
+//   1) activityHandling = NO_INTERRUPTION — ВСЕГДА, в обоих режимах.
+//      Раньше в обычном режиме стоял START_OF_ACTIVITY_INTERRUPTS, и эхо
+//      собственного динамика (или случайный шум) ОБРЫВАЛО генерацию сервера
+//      на 2-м слове. Переводчика перебивать нельзя в принципе: его реплики
+//      короткие (это перевод, а не лекция), а цена ложного barge-in —
+//      потерянный перевод. В паре с полудуплексным гейтом микрофона в
+//      AndroidAudioEngine v5.0 это полностью убирает класс багов
+//      «обрыв + петля перевода собственного перевода».
 //
-//   2) VAD СБАЛАНСИРОВАН ПОД МГНОВЕННЫЙ TURN-TAKING.
-//      start=HIGH  — быстро ловит начало речи и первый слог коротких слов
-//                    (фикс «Hallo→palo»), быстрый barge-in.
-//      end=LOW     — НЕ режет середину фразы на естественных паузах.
-//      silence=600 — снаппи закрытие хода (вместо медленных 800мс), но
-//                    безопасно против обрыва ввода.
-//      prefix=300  — защита первой фонемы коротких слов.
+//   2) VAD ПОД РЕАЛЬНУЮ ЖИВУЮ РЕЧЬ (быстрые И длинные фразы):
+//      start  = HIGH    — мгновенно ловит начало речи и первый слог.
+//      end    = LOW     — не реагирует на короткие паузы внутри фразы.
+//      silence= 800 мс  (1500 мс в режиме «длинные фразы») — немецкие и
+//                        русские придаточные с паузами больше не режутся
+//                        пополам; при этом ход закрывается достаточно
+//                        быстро для живого диалога.
+//      prefix = 300 мс  — защита первой фонемы коротких слов.
 //
-//   3) ПРОМПТ УСИЛЕН ПРОТИВ ДВУХ БАГОВ:
-//      • «Hallo→Hallo / Danke→Danke» — короткие слова/приветствия ОБЯЗАНЫ
-//        переводиться, эхо запрещено (кроме имён собственных).
-//      • «часто молчит» — для ЛЮБОЙ валидной реплики на A или B озвучка
-//        ОБЯЗАТЕЛЬНА; молчание только на третий язык / шум.
-//      • полная фраза до конца (включая финальный глагол).
+//   3) turnCoverage зафиксирован TURN_INCLUDES_ONLY_ACTIVITY — в ход модели
+//      попадает только речь, без тишины между репликами (меньше токенов,
+//      чище контекст, быстрее ответ).
 //
-// VAD/temperature по-прежнему фиксированы намеренно: для переводчика нужны
-// строго определённые параметры, иначе модель срывается на третий язык и рвёт
-// транскрипцию. Пользовательские VAD-настройки игнорируются осознанно.
+//   4) maxOutputTokens ≥ 8192 — аудио-выход расходует токены ответа,
+//      512 обрезали бы озвучку длинной фразы.
+//
+//   5) Thinking минимум Low — Off/minimal рвут длинные фразы (финальный
+//      глагол в русском/немецком уходит в конец предложения).
+//
+// VAD/temperature фиксированы намеренно: для переводчика нужны строго
+// определённые параметры. Пользовательские VAD-настройки игнорируются.
 // ═══════════════════════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator
 
@@ -104,15 +108,20 @@ For every user utterance you perform exactly these steps:
   identical to the input. If your output equals the input, you have FAILED —
   translate it properly.
 
-**COMPLETENESS RULE:**
+**COMPLETENESS RULE (CRITICAL):**
 - Translate the ENTIRE utterance, all the way to the end, including final verbs,
-  particles, and closing words. Never stop mid-sentence. A partial translation
-  is a failure — produce the complete sentence.
+  particles, subordinate clauses, and closing words. Never stop mid-sentence.
+- Long input → long output. If the speaker talked for twenty seconds, your
+  translation must cover everything they said, sentence by sentence, in order.
+  A partial translation is a FAILURE — always produce the complete rendition.
+- Never compress, summarize, or skip parts of the input. Translate, do not
+  abridge.
 
 **OUTPUT FORMAT:**
 - Output is ONLY the translated text, spoken aloud. Nothing before, nothing after.
 - No quotation marks, no labels, no language tags in speech.
-- Match the length of the input: short input → short output.
+- Match the length of the input: short input → short output, long input → long
+  output.
 - Speak in a neutral, clear native voice of the target language. Do not carry
   the source-language accent into the target language.
 
@@ -149,13 +158,22 @@ YOU MUST FOLLOW THESE RULES UNMISTAKABLY. NO EXCEPTIONS.
         // пользовательских настроек).
         // ═══════════════════════════════════════════════════════════════════
 
-        // Режим "Длинные фразы": дольше ждём конец речи + полностью без barge-in.
+        // VAD: быстрый старт, терпеливый конец. silence 800 мс держит
+        // естественные паузы внутри длинной фразы; режим «длинные фразы»
+        // расширяет до 1500 мс для медленной/обдумывающей речи.
         val translatorVadStartSensitivity = "START_SENSITIVITY_HIGH"
         val translatorVadEndSensitivity = "END_SENSITIVITY_LOW"
-        val translatorVadSilenceDurationMs = if (settings.longPhraseMode) 1200 else 600
+        val translatorVadSilenceDurationMs = if (settings.longPhraseMode) 1500 else 800
         val translatorVadPrefixPaddingMs = 300
-        val translatorActivityHandling =
-            if (settings.longPhraseMode) "NO_INTERRUPTION" else settings.activityHandling
+
+        // ПЕРЕВОДЧИКА НЕ ПЕРЕБИВАЮТ. НИКОГДА.
+        // START_OF_ACTIVITY_INTERRUPTS в старой версии позволял эху динамика
+        // обрывать генерацию на 2-м слове. Реплики переводчика короткие —
+        // barge-in здесь не нужен, а его цена — потерянный перевод.
+        val translatorActivityHandling = "NO_INTERRUPTION"
+
+        // В ход модели включаем только речь (без межфразовой тишины).
+        val translatorTurnCoverage = "TURN_INCLUDES_ONLY_ACTIVITY"
 
         // Thinking из настроек, но не ниже Low — Off/minimal рвут длинные фразы.
         val requested = runCatching { LatencyProfile.valueOf(settings.latencyProfile) }
@@ -185,7 +203,7 @@ YOU MUST FOLLOW THESE RULES UNMISTAKABLY. NO EXCEPTIONS.
             vadSilenceDurationMs = translatorVadSilenceDurationMs,
             vadPrefixPaddingMs = translatorVadPrefixPaddingMs,
             activityHandling = translatorActivityHandling,
-            turnCoverage = settings.turnCoverage,
+            turnCoverage = translatorTurnCoverage,
 
             systemInstruction = buildSystemInstruction(source.nameEn, target.nameEn),
 
