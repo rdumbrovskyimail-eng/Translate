@@ -1,25 +1,40 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Путь: app/src/main/java/com/translator/app/presentation/translator/TranslatorViewModel.kt
 //
-// ПОЛНАЯ ЗАМЕНА (v4.0 — лёгкий аудио-путь)
+// ПОЛНАЯ ЗАМЕНА (v5.0 — беспроигрышный turn-taking)
 //
-// ГЛАВНЫЙ ФИКС «молчит, а текст появляется»:
-//   Раньше на КАЖДЫЙ аудио-чанк обработчик делал _state.update {} (рекомпозиция)
-//   и startStuckTurnWatchdog() (отмена+запуск корутины). Десятки раз за реплику
-//   это забивало главный поток → коллектор событий отставал → SharedFlow с
-//   DROP_OLDEST выкидывал аудио-чанки, а редкая транскрипция проскакивала.
+// Что и зачем изменено (диагноз «сказало 2 слова и зависло»):
 //
-//   Теперь обработчик аудио-чанка «лёгкий»:
-//     • отдаём PCM движку (enqueuePlayback — это лишь trySend, не блокирует),
-//     • состояние isAiSpeaking и вотчдог взводятся ОДИН раз на ход,
-//     • никаких per-chunk запусков корутин.
-//   Вместе с выделенным playback-потоком движка и буфером ~200мс это убирает
-//   потери аудио.
+//   1) УБРАН РУЧНОЙ ПОЛУДУПЛЕКС ИЗ VIEWMODEL (источник «зависания»).
+//      Раньше в longPhraseMode на первом аудио-чанке вызывался
+//      audioEngine.stopCapture(), а startCapture() — ТОЛЬКО по TurnComplete
+//      и только при status == Recording. Если вместо TurnComplete приходил
+//      Interrupted, рвалась сеть или ход «застревал», микрофон не включался
+//      больше НИКОГДА → приложение глохло («висит»). Теперь полудуплекс
+//      реализован внутри AndroidAudioEngine v5.0 (гейт отправки чанков,
+//      AudioRecord не останавливается) и открывается автоматически по факту
+//      окончания звука — ни одна ветка событий не может оставить его
+//      закрытым.
 //
-// Дополнительно: убран дубль логирования транскриптов.
+//   2) Interrupted БЕЗ ЭВРИСТИКИ «looksLikeEcho».
+//      Эвристика прятала событие, но не возвращала звук: сервер уже прервал
+//      генерацию. Теперь (с NO_INTERRUPTION в TranslatorSession v5.0 + гейт
+//      микрофона) ложных Interrupted от эха не бывает в принципе, а если
+//      событие всё же пришло — обрабатываем честно: flush, финализация пары,
+//      сброс состояния хода.
 //
-// Вся остальная логика (смена языковой пары, реконнект, мониторинг сети,
-// foreground-сервис, пары транскриптов) сохранена без изменений поведения.
+//   3) УБРАНЫ сбросы lastSeenTurnId = Long.MIN_VALUE на границах хода.
+//      turnId монотонно растёт на стороне клиента, поэтому аудио нового хода
+//      ВСЕГДА проходит фильтр. Сброс же позволял «хвостовым» чанкам
+//      завершённого хода проигрываться в следующем. Сброс остаётся только
+//      при stop/hard-reset (где клиентский счётчик всё равно монотонен).
+//
+//   4) GenerationComplete больше не гасит isAiSpeaking — звук в этот момент
+//      ещё дозвучивает из буфера; индикатор гасится по TurnComplete.
+//
+// Из v4.0 сохранено: «лёгкий» обработчик аудио-чанка (никаких корутин и
+// _state.update на каждый чанк), смена языковой пары через HARD reset,
+// реконнект, мониторинг сети, foreground-сервис, пары транскриптов.
 // ═══════════════════════════════════════════════════════════════════════════
 package com.translator.app.presentation.translator
 
@@ -194,7 +209,7 @@ class TranslatorViewModel @Inject constructor(
         .map { it.longPhraseMode }
         .stateIn(viewModelScope, kotlinx.coroutines.flow.SharingStarted.Eagerly, false)
 
-    /** Переключает режим и переподключает сессию с новым VAD/barge-in. */
+    /** Переключает режим и переподключает сессию с новым VAD. */
     fun setLongPhraseMode(on: Boolean) {
         viewModelScope.launch {
             val updated = settingsStore.updateData { it.copy(longPhraseMode = on) }
@@ -293,6 +308,9 @@ class TranslatorViewModel @Inject constructor(
             audioEngine.setSpeakerRouting(settings.forceSpeakerOutput)
             audioEngine.setPlaybackBoost(settings.playbackBoost)
             audioEngine.setUseAec(settings.useAec)
+            // Полудуплекс: пока перевод звучит — микрофонные чанки не уходят.
+            // Это полностью исключает обрыв перевода эхом собственного динамика.
+            audioEngine.setMicGateDuringPlayback(true)
 
             startForegroundServiceSafe(settings.forceSpeakerOutput)
             connectInternal(freshSession = true)
@@ -422,18 +440,14 @@ class TranslatorViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.AudioChunk -> {
-                        // Отсекаем stale-чанки старых ходов.
+                        // Отсекаем stale-чанки старых ходов (turnId монотонный).
                         if (event.turnId < lastSeenTurnId.get()) return@collect
                         if (event.turnId > lastSeenTurnId.get()) lastSeenTurnId.set(event.turnId)
 
-                        // Полудуплекс: пока ИИ говорит — глушим микрофон, чтобы его
-                        // голос из динамика не влетел в микрофон и не оборвал перевод.
-                        if (cachedSettings.longPhraseMode && _state.value.isMicActive) {
-                            runCatching { audioEngine.stopCapture() }
-                        }
-
                         lastAiAudioChunkAtMs.set(System.currentTimeMillis())
                         // ЛЁГКО: только передаём PCM движку (trySend, не блокирует).
+                        // Полудуплексный гейт микрофона движок включает САМ —
+                        // никаких stopCapture/startCapture и связанных дедлоков.
                         audioEngine.enqueuePlayback(event.pcmData)
 
                         // Состояние и вотчдог — ОДИН раз на ход, не на каждый чанк.
@@ -481,43 +495,34 @@ class TranslatorViewModel @Inject constructor(
                     }
 
                     is GeminiEvent.Interrupted -> {
-                        // Ложный barge-in от эха динамика в первые ~1500 мс речи ИИ:
-                        // НЕ сбрасываем аудио — даём переводу договориться.
-                        val lastChunk = lastAiAudioChunkAtMs.get()
-                        val sinceStart = System.currentTimeMillis() - lastChunk
-                        val looksLikeEcho = lastChunk > 0L && sinceStart < 1500L
-
-                        if (!looksLikeEcho) {
-                            runCatching { audioEngine.flushPlayback() }
-                            stuckTurnWatchdogJob?.cancel()
-                            finalizeOpenPair()
-                        }
-                        // Состояние хода сбрасываем ВСЕГДА — иначе следующий ход
-                        // решит, что его аудио "устарело", и динамик замолчит.
+                        // С NO_INTERRUPTION + гейтом микрофона ложных Interrupted
+                        // от эха не бывает. Если событие пришло — это реальная
+                        // граница хода: честно завершаем его.
+                        logger.w("⏹ Interrupted — finalizing turn")
+                        runCatching { audioEngine.flushPlayback() }
+                        stuckTurnWatchdogJob?.cancel()
+                        finalizeOpenPair()
                         _state.update { it.copy(isAiSpeaking = false) }
                         hasModelOutputThisTurn.set(false)
-                        lastSeenTurnId.set(Long.MIN_VALUE)
+                        lastAiAudioChunkAtMs.set(0L)
+                        // lastSeenTurnId НЕ трогаем: turnId монотонный, новый ход
+                        // всегда проходит фильтр, а stale-чанки старого — нет.
                     }
 
                     is GeminiEvent.TurnComplete -> {
                         audioEngine.onTurnComplete()
                         _state.update { it.copy(isAiSpeaking = false) }
                         hasModelOutputThisTurn.set(false)
-                        lastSeenTurnId.set(Long.MIN_VALUE)
+                        lastAiAudioChunkAtMs.set(0L)
                         stuckTurnWatchdogJob?.cancel()
                         finalizeOpenPair()
-
-                        // ИИ договорил — возвращаем микрофон (только в длинном режиме).
-                        if (cachedSettings.longPhraseMode &&
-                            _state.value.connectionStatus == ConnectionStatus.Recording
-                        ) {
-                            viewModelScope.launch { audioEngine.startCapture() }
-                        }
+                        // Микрофон вернётся сам: гейт в движке открывается, как
+                        // только дозвучит аппаратный буфер (+эхо-хвост).
                     }
 
                     is GeminiEvent.GenerationComplete -> {
-                        _state.update { it.copy(isAiSpeaking = false) }
-                        stuckTurnWatchdogJob?.cancel()
+                        // Генерация завершена, но звук ещё дозвучивает из буфера —
+                        // isAiSpeaking гасим по TurnComplete, не здесь.
                         currentOpenPairId?.let { id -> updatePair(id) { it.copy(translationIsFinal = true) } }
                     }
 
@@ -742,6 +747,12 @@ class TranslatorViewModel @Inject constructor(
         else -> "lat"
     }
 
+    /**
+     * Вотчдог «застрявшего хода»: если модель начала отвечать, но ни аудио,
+     * ни turnComplete не приходят > 2 c после последнего чанка — принудительно
+     * финализируем ход. Гейт микрофона в движке откроется сам по факту
+     * окончания звука, поэтому этот путь НИКОГДА не оставляет приложение глухим.
+     */
     private fun startStuckTurnWatchdog() {
         stuckTurnWatchdogJob?.cancel()
         stuckTurnWatchdogJob = viewModelScope.launch {
