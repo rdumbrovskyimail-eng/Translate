@@ -1,17 +1,20 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Путь: app/src/main/java/com/translator/app/presentation/translator/MinimalTranslateScreen.kt
 //
-// АЛЬТЕРНАТИВНЫЙ ЭКРАН ПЕРЕВОДЧИКА — «Minimal» (профессиональный минимализм).
+// ПОЛНАЯ ЗАМЕНА (v2.0 — выбор любых языков прямо с минимального экрана)
 //
-// Дизайн:
-//   • Чистый сплошной белый фон.
-//   • Сверху слева — очень маленькая пара языков латиницей, чёрным (тап = swap).
-//   • Крупные полноширинные карточки: белая заливка + профессиональное синее
-//     обрамление, очень большой жирный чёрный текст. Карточки «выпрыгивают»
-//     (scale + fade) при появлении.
-//   • Внизу — аудио-реактивный ОДНОТОННЫЙ синий эквалайзер (тонкие полосы,
-//     без кружков), зависит от громкости воспроизводимого перевода.
-//   • Ещё ниже — архитектурная минималистичная кнопка-пилюля (mic / stop).
+// Что нового vs v1.0:
+//   • Верхняя пара языков теперь ИНТЕРАКТИВНАЯ: тап по левому языку открывает
+//     минималистичный пикер для исходного языка, тап по правому — для
+//     целевого, стрелка между ними — swap. Доступны все 100 языков
+//     (Languages.ALL), с мгновенным поиском по русскому/английскому названию
+//     и коду. Выбор языка автоматически пересоздаёт сессию (HARD reset во
+//     ViewModel) — переключение «на лету».
+//   • Пикер выдержан в стиле экрана: белый лист, синий акцент, ничего
+//     лишнего. Текущий язык подсвечен, второй язык пары задизейблен.
+//
+// Дизайн остального экрана сохранён: белый фон, крупные карточки с синим
+// обрамлением, однотонный синий эквалайзер, кнопка-пилюля.
 //
 // Экран использует ТОТ ЖЕ TranslatorViewModel и всю его логику. Сигнатура
 // совпадает с TranslateScreen — навигация переключается одной строкой.
@@ -45,8 +48,7 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
-import androidx.compose.material3.Slider
-import androidx.compose.material3.SliderDefaults
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.systemBarsPadding
@@ -57,32 +59,42 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.List
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Mic
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.SwapHoriz
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
+import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.runtime.withFrameMillis
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
-import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Dialog
+import androidx.compose.ui.window.DialogProperties
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.translator.app.domain.model.Language
+import com.translator.app.domain.model.Languages
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.launch
 import kotlin.math.abs
@@ -94,6 +106,9 @@ private val MinInk = Color(0xFF0A0A0A)            // «чёрный» текст
 private val MinBlue = Color(0xFF2563EB)           // профессиональный сине-голубой
 private val MinBlueSoft = Color(0x142563EB)       // лёгкая тень/подложка
 private val MinMuted = Color(0xFF9AA0A6)          // приглушённый серый (статус)
+private val MinField = Color(0xFFF3F4F6)          // фон поля поиска
+
+private enum class MinPickerSide { SOURCE, TARGET }
 
 @Composable
 fun MinimalTranslateScreen(
@@ -107,6 +122,8 @@ fun MinimalTranslateScreen(
     val context = LocalContext.current
     val isActive = state.connectionStatus != ConnectionStatus.Disconnected
 
+    var pickerFor by remember { mutableStateOf<MinPickerSide?>(null) }
+
     val micLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.RequestPermission()
     ) { granted ->
@@ -116,7 +133,7 @@ fun MinimalTranslateScreen(
         }
     }
 
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) {
         if (!isActive) {
             if (ContextCompat.checkSelfPermission(
                     context, Manifest.permission.RECORD_AUDIO
@@ -135,9 +152,11 @@ fun MinimalTranslateScreen(
             .systemBarsPadding()
     ) {
         MinimalTopBar(
-            sourceName = state.sourceLanguage.nameEn,
-            targetName = state.targetLanguage.nameEn,
+            source = state.sourceLanguage,
+            target = state.targetLanguage,
             status = statusLabel(state.connectionStatus, state.isMicActive, state.isAiSpeaking),
+            onPickSource = { pickerFor = MinPickerSide.SOURCE },
+            onPickTarget = { pickerFor = MinPickerSide.TARGET },
             onSwap = viewModel::swapLanguages,
             onSettings = onNavigateToSettings,
             onLogs = onNavigateToLogs
@@ -206,17 +225,36 @@ fun MinimalTranslateScreen(
             modifier = Modifier.padding(start = 24.dp, end = 24.dp, bottom = 24.dp, top = 4.dp)
         )
     }
+
+    // ── Пикер языка (исходный или целевой) ──
+    pickerFor?.let { side ->
+        val current = if (side == MinPickerSide.SOURCE) state.sourceLanguage else state.targetLanguage
+        val excluded = if (side == MinPickerSide.SOURCE) state.targetLanguage else state.sourceLanguage
+        MinimalLanguagePicker(
+            title = if (side == MinPickerSide.SOURCE) "Язык 1" else "Язык 2",
+            currentCode = current.code,
+            excludedCode = excluded.code,
+            onDismiss = { pickerFor = null },
+            onPick = { lang ->
+                if (side == MinPickerSide.SOURCE) viewModel.setSourceLanguage(lang)
+                else viewModel.setTargetLanguage(lang)
+                pickerFor = null
+            }
+        )
+    }
 }
 
 // ════════════════════════════════════════════════════════════════════
-//  TOP BAR — маленькая пара языков слева + мини-иконки справа
+//  TOP BAR — интерактивная пара языков слева + мини-иконки справа
 // ════════════════════════════════════════════════════════════════════
 
 @Composable
 private fun MinimalTopBar(
-    sourceName: String,
-    targetName: String,
+    source: Language,
+    target: Language,
     status: String,
+    onPickSource: () -> Unit,
+    onPickTarget: () -> Unit,
     onSwap: () -> Unit,
     onSettings: () -> Unit,
     onLogs: () -> Unit
@@ -228,27 +266,44 @@ private fun MinimalTopBar(
         verticalAlignment = Alignment.CenterVertically
     ) {
         Column(modifier = Modifier.weight(1f)) {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.clickable(
-                    interactionSource = remember { MutableInteractionSource() },
-                    indication = null,
-                    onClick = onSwap
-                )
-            ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                // Тап по языку → пикер (любой из 100 языков).
                 Text(
-                    text = "$sourceName – $targetName",
+                    text = source.nameEn,
                     color = MinInk,
                     fontSize = 13.sp,
                     fontWeight = FontWeight.SemiBold,
-                    letterSpacing = 0.2.sp
+                    letterSpacing = 0.2.sp,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onPickSource
+                    )
                 )
-                Spacer(Modifier.width(4.dp))
                 Icon(
                     Icons.Filled.SwapHoriz,
                     contentDescription = "Поменять языки",
                     tint = MinBlue,
-                    modifier = Modifier.size(14.dp)
+                    modifier = Modifier
+                        .padding(horizontal = 6.dp)
+                        .size(16.dp)
+                        .clickable(
+                            interactionSource = remember { MutableInteractionSource() },
+                            indication = null,
+                            onClick = onSwap
+                        )
+                )
+                Text(
+                    text = target.nameEn,
+                    color = MinInk,
+                    fontSize = 13.sp,
+                    fontWeight = FontWeight.SemiBold,
+                    letterSpacing = 0.2.sp,
+                    modifier = Modifier.clickable(
+                        interactionSource = remember { MutableInteractionSource() },
+                        indication = null,
+                        onClick = onPickTarget
+                    )
                 )
             }
             if (status.isNotEmpty()) {
@@ -280,6 +335,128 @@ private fun statusLabel(
 }
 
 // ════════════════════════════════════════════════════════════════════
+//  LANGUAGE PICKER — минималистичный, с мгновенным поиском по 100 языкам
+// ════════════════════════════════════════════════════════════════════
+
+@Composable
+private fun MinimalLanguagePicker(
+    title: String,
+    currentCode: String,
+    excludedCode: String,
+    onDismiss: () -> Unit,
+    onPick: (Language) -> Unit
+) {
+    var query by remember { mutableStateOf("") }
+    val filtered = remember(query) {
+        val q = query.trim()
+        if (q.isEmpty()) Languages.ALL
+        else Languages.ALL.filter {
+            it.nameRu.contains(q, ignoreCase = true) ||
+            it.nameEn.contains(q, ignoreCase = true) ||
+            it.code.contains(q, ignoreCase = true)
+        }
+    }
+
+    Dialog(
+        onDismissRequest = onDismiss,
+        properties = DialogProperties(usePlatformDefaultWidth = false)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(20.dp)
+                .heightIn(max = 560.dp)
+                .shadow(12.dp, RoundedCornerShape(24.dp), spotColor = MinBlue.copy(alpha = 0.25f))
+                .clip(RoundedCornerShape(24.dp))
+                .background(MinBg)
+                .padding(16.dp)
+        ) {
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    text = title,
+                    color = MinInk,
+                    fontSize = 17.sp,
+                    fontWeight = FontWeight.ExtraBold,
+                    modifier = Modifier.weight(1f)
+                )
+                IconButton(onClick = onDismiss, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Filled.Close, contentDescription = "Закрыть",
+                        tint = MinMuted, modifier = Modifier.size(18.dp))
+                }
+            }
+
+            Spacer(Modifier.height(10.dp))
+
+            TextField(
+                value = query,
+                onValueChange = { query = it },
+                singleLine = true,
+                placeholder = { Text("Поиск языка…", color = MinMuted, fontSize = 14.sp) },
+                leadingIcon = {
+                    Icon(Icons.Filled.Search, contentDescription = null,
+                        tint = MinMuted, modifier = Modifier.size(18.dp))
+                },
+                colors = TextFieldDefaults.colors(
+                    focusedContainerColor = MinField,
+                    unfocusedContainerColor = MinField,
+                    focusedIndicatorColor = Color.Transparent,
+                    unfocusedIndicatorColor = Color.Transparent,
+                    cursorColor = MinBlue,
+                    focusedTextColor = MinInk,
+                    unfocusedTextColor = MinInk
+                ),
+                shape = RoundedCornerShape(14.dp),
+                modifier = Modifier.fillMaxWidth()
+            )
+
+            Spacer(Modifier.height(10.dp))
+
+            LazyColumn(
+                verticalArrangement = Arrangement.spacedBy(2.dp),
+                modifier = Modifier.weight(1f, fill = false)
+            ) {
+                items(filtered, key = { it.code }) { lang ->
+                    val isSelected = lang.code == currentCode
+                    val isDisabled = lang.code == excludedCode
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(if (isSelected) MinBlueSoft else Color.Transparent)
+                            .clickable(enabled = !isDisabled) { onPick(lang) }
+                            .padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Text(text = lang.flag, fontSize = 20.sp)
+                        Spacer(Modifier.width(12.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = lang.nameRu,
+                                color = when {
+                                    isDisabled -> MinMuted.copy(alpha = 0.5f)
+                                    isSelected -> MinBlue
+                                    else -> MinInk
+                                },
+                                fontSize = 15.sp,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium
+                            )
+                            Text(
+                                text = lang.nameEn,
+                                color = MinMuted.copy(alpha = if (isDisabled) 0.5f else 1f),
+                                fontSize = 11.sp
+                            )
+                        }
+                        if (isDisabled) {
+                            Text(text = "уже выбран", color = MinMuted, fontSize = 11.sp)
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+// ════════════════════════════════════════════════════════════════════
 //  PAIRS — крупные полноширинные карточки с pop-анимацией
 // ════════════════════════════════════════════════════════════════════
 
@@ -288,7 +465,7 @@ private fun MinimalPairsList(pairs: List<TranslationPair>) {
     val listState = rememberLazyListState()
     val last = pairs.lastOrNull()
 
-    androidx.compose.runtime.LaunchedEffect(
+    LaunchedEffect(
         pairs.size, last?.originalText?.length, last?.translationText?.length
     ) {
         if (pairs.isNotEmpty()) listState.animateScrollToItem(pairs.size - 1)
@@ -324,7 +501,7 @@ private fun MinimalPairsList(pairs: List<TranslationPair>) {
 private fun PopIn(modifier: Modifier = Modifier, content: @Composable () -> Unit) {
     val scale = remember { Animatable(0.92f) }
     val alpha = remember { Animatable(0f) }
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) {
         launch { scale.animateTo(1f, spring(dampingRatio = 0.62f, stiffness = Spring.StiffnessMediumLow)) }
         launch { alpha.animateTo(1f, tween(220)) }
     }
@@ -389,14 +566,14 @@ private fun AudioEqualizer(
     // Уровень громкости 0..1: вверх по эмиссии, плавный спад по кадрам.
     var level by remember { mutableFloatStateOf(0f) }
 
-    androidx.compose.runtime.LaunchedEffect(audioFlow) {
+    LaunchedEffect(audioFlow) {
         audioFlow.collect { bytes ->
             val amp = pcmPeak(bytes)
             if (amp > level) level = amp
         }
     }
     // Покадровый спад, чтобы полосы мягко опускались, когда звук смолк.
-    androidx.compose.runtime.LaunchedEffect(Unit) {
+    LaunchedEffect(Unit) {
         var last = 0L
         while (true) {
             withFrameMillis { t ->
@@ -461,8 +638,6 @@ private fun pcmPeak(pcm: ByteArray): Float {
 // ════════════════════════════════════════════════════════════════════
 //  MIC BUTTON — архитектурная минималистичная пилюля
 // ════════════════════════════════════════════════════════════════════
-
-
 
 @Composable
 private fun MinimalMicButton(
