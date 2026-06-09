@@ -1,28 +1,41 @@
 // ═══════════════════════════════════════════════════════════════════════════
 // Путь: app/src/main/java/com/translator/app/data/AndroidAudioEngine.kt
 //
-// ПОЛНАЯ ЗАМЕНА (v4.0 — изолированный realtime-конвейер)
+// ПОЛНАЯ ЗАМЕНА (v5.0 — полудуплексный гейт микрофона на уровне движка)
 //
-// Что и зачем изменено (диагноз «молчит, а текст появляется»):
-//   Раньше воспроизведение конкурировало за главный поток и ехало через
-//   лоссовый общий event-bus, поэтому аудио-чанки дропались, а редкая
-//   транскрипция проскакивала. Теперь:
+// ЧТО НОВОГО vs v4.0 (фикс «сказало 2 слова и зависло»):
 //
-//   1) CAPTURE и PLAYBACK живут на ВЫДЕЛЕННЫХ однопоточных диспетчерах с
-//      аудио-приоритетом потока (THREAD_PRIORITY_URGENT_AUDIO / _AUDIO).
-//      Они физически не зависят от UI и от сетевого потока OkHttp.
-//   2) Блокирующая запись в AudioTrack сама пейсит поток (backpressure) —
-//      никаких busy-loop и потерь.
-//   3) Джиттер-буфер делает гладкий старт каждой реплики (без подзёрна).
-//   4) Barge-in (flushPlayback) мгновенно чистит и канал, и аппаратный буфер.
-//   5) Телеметрия: счётчики дропов очереди и underrun'ов AudioTrack.
+//   1) ПОЛУДУПЛЕКСНЫЙ ГЕЙТ МИКРОФОНА (главный фикс).
+//      Пока перевод реально ЗВУЧИТ из динамика, микрофонные чанки не уходят
+//      в micOutput. Голос Gemini из динамика больше не влетает в её же
+//      микрофонный вход → серверный VAD не видит «речь» → сервер НЕ обрывает
+//      генерацию на 2-м слове, и не возникает петля «перевожу собственный
+//      перевод».
+//
+//      Ключевые свойства реализации:
+//        • AudioRecord НЕ останавливается — мы продолжаем читать и просто
+//          не отправляем. AEC/NS/AGC не теряют сходимость, нет латентности
+//          рестарта капчера, и НЕВОЗМОЖЕН дедлок «микрофон забыли включить»
+//          (прежний баг longPhraseMode: stopCapture на чанке + startCapture
+//          только по TurnComplete → при Interrupted/застрявшем ходе
+//          приложение глохло навсегда).
+//        • Гейт «слышимости» учитывает аппаратный буфер AudioTrack:
+//          isPlaybackAudible = (очередь не пуста) ИЛИ (с последней записи в
+//          AudioTrack прошло < PLAYBACK_BUFFER_MS + ECHO_TAIL_MS). То есть
+//          гейт держится ровно пока звук физически выходит из динамика
+//          плюс короткий хвост комнатного эха, и мгновенно отпускается
+//          после flushPlayback().
+//        • Гейт проверяется ДО DSP-обработки чанка — ноль лишнего CPU.
+//
+//   2) Телеметрия гейта: лог при каждом закрытии/открытии (не на чанк).
+//
+// Всё остальное из v4.0 сохранено: выделенные realtime-потоки capture и
+// playback, джиттер-пребуфер, блокирующая запись как backpressure,
+// AGC + soft-gate + tanh-клиппинг, пул буферов без аллокаций в hot-loop.
 //
 // Соответствие официальной документации Gemini Live API:
 //   • Вход  — raw 16-bit PCM, 16 kHz, little-endian  (SessionConfig.INPUT_SAMPLE_RATE)
 //   • Выход — raw 16-bit PCM, 24 kHz                  (SessionConfig.OUTPUT_SAMPLE_RATE)
-//   Ровно эти форматы требует Live API; ресемплинг не нужен.
-//
-// Контракт интерфейса AudioEngine сохранён 1:1 — остальной код не меняется.
 // ═══════════════════════════════════════════════════════════════════════════
 package com.translator.app.data
 
@@ -89,9 +102,13 @@ class AndroidAudioEngine(
         private const val GAIN_CEILING = 2.5f
 
         // ─── Целевой аппаратный буфер воспроизведения (мс) ───
-        // 200 мс — компромисс: достаточно, чтобы пережить сетевой джиттер и
-        // burst-доставку без подзёрна, но не раздувает задержку.
         private const val PLAYBACK_BUFFER_MS = 200
+
+        // ─── Полудуплексный гейт ───
+        // Хвост после последней записи в AudioTrack: буфер ещё дозвучивает
+        // (~PLAYBACK_BUFFER_MS) + комнатное эхо/реверберация (~300 мс).
+        private const val ECHO_TAIL_MS = 300L
+        private const val MIC_GATE_HANGOVER_MS = PLAYBACK_BUFFER_MS + ECHO_TAIL_MS
 
         // Логировать накопленные дропы/underrun каждые N событий.
         private const val TELEMETRY_EVERY = 50L
@@ -110,11 +127,15 @@ class AndroidAudioEngine(
     @Volatile private var useAec: Boolean = true
     @Volatile private var playbackBoost: Float = 1.4f
 
+    // ─── Полудуплекс ───
+    @Volatile private var micGateDuringPlayback: Boolean = true
+    /** Момент последней реальной записи PCM в AudioTrack (0 = тишина). */
+    @Volatile private var lastTrackWriteAtMs: Long = 0L
+    /** Только для телеметрии: текущее видимое состояние гейта. */
+    @Volatile private var micGateClosedNow: Boolean = false
+
     // ════════════════════════════════════════════════════════════════════
     //  ВЫДЕЛЕННЫЕ АУДИО-ДИСПЕТЧЕРЫ
-    //  По одному реальному потоку на capture и playback. Они создаются один
-    //  раз на весь жизненный цикл синглтона и переиспользуются — это даёт
-    //  стабильный аудио-поток с высоким приоритетом, не завязанный на UI/IO.
     // ════════════════════════════════════════════════════════════════════
     private val captureDispatcher: CoroutineDispatcher =
         Executors.newSingleThreadExecutor { r -> Thread(r, "gem-audio-capture") }
@@ -128,8 +149,6 @@ class AndroidAudioEngine(
     //  ВЫХОДНЫЕ ПОТОКИ
     // ════════════════════════════════════════════════════════════════════
 
-    // Микрофонный поток. Channel с DROP_OLDEST + onUndeliveredElement,
-    // чтобы вытесненный чанк гарантированно вернулся в пул (без утечек).
     private val _micChannel = Channel<MicAudioChunk>(
         capacity = 16,
         onBufferOverflow = BufferOverflow.DROP_OLDEST,
@@ -137,8 +156,6 @@ class AndroidAudioEngine(
     )
     override val micOutput: Flow<MicAudioChunk> = _micChannel.receiveAsFlow()
 
-    // Сигнал для UI-визуализации (уровень речи). tryEmit — НИКОГДА не блокирует
-    // playback-поток. UI сам считает уровень из PCM.
     private val _playbackSync = MutableSharedFlow<ByteArray>(
         replay = 0,
         extraBufferCapacity = 64,
@@ -148,6 +165,17 @@ class AndroidAudioEngine(
 
     @Volatile override var isCapturing: Boolean = false; private set
     @Volatile override var isPlaying: Boolean = false; private set
+
+    /**
+     * Перевод физически звучит из динамика прямо сейчас (или дозвучивает
+     * аппаратный буфер + эхо-хвост).
+     */
+    override val isPlaybackAudible: Boolean
+        get() {
+            if (!playbackChannel.isEmpty) return true
+            val last = lastTrackWriteAtMs
+            return last > 0L && System.currentTimeMillis() - last < MIC_GATE_HANGOVER_MS
+        }
 
     // ════════════════════════════════════════════════════════════════════
     //  STATE
@@ -203,6 +231,11 @@ class AndroidAudioEngine(
     override fun setPlaybackBoost(boost: Float) { playbackBoost = boost.coerceIn(1.0f, 1.8f) }
 
     override fun setUseAec(enabled: Boolean) { useAec = enabled }
+
+    override fun setMicGateDuringPlayback(enabled: Boolean) {
+        micGateDuringPlayback = enabled
+        logger.d("Mic half-duplex gate: ${if (enabled) "ON" else "OFF"}")
+    }
 
     // ════════════════════════════════════════════════════════════════════
     //  CAPTURE
@@ -291,7 +324,7 @@ class AndroidAudioEngine(
 
         audioRecord = recorder
         isCapturing = true
-        logger.d("Recording started rate=$sampleRate src=$usedSource pool=${poolBufSize}B×32")
+        logger.d("Recording started rate=$sampleRate src=$usedSource pool=${poolBufSize}B×32 gate=$micGateDuringPlayback")
 
         captureJob = engineScope.launch(captureDispatcher) {
             Process.setThreadPriority(Process.THREAD_PRIORITY_AUDIO)
@@ -304,6 +337,25 @@ class AndroidAudioEngine(
                     val read = recorder.read(buffer, 0, buffer.size)
                     when {
                         read > 0 -> {
+                            // ── ПОЛУДУПЛЕКСНЫЙ ГЕЙТ ─────────────────────────
+                            // Пока перевод физически звучит из динамика
+                            // (+эхо-хвост), микрофонный чанк не отправляем.
+                            // Читать из AudioRecord продолжаем — буфер не
+                            // переполняется, AEC остаётся сошедшимся, а после
+                            // окончания звука первый же чанк уйдёт без
+                            // задержки рестарта капчера.
+                            if (micGateDuringPlayback && isPlaybackAudible) {
+                                if (!micGateClosedNow) {
+                                    micGateClosedNow = true
+                                    logger.d("🔇 mic gate CLOSED (AI speaking)")
+                                }
+                                continue
+                            }
+                            if (micGateClosedNow) {
+                                micGateClosedNow = false
+                                logger.d("🎙 mic gate OPEN")
+                            }
+
                             // Пик блока.
                             var lp = 0
                             for (i in 0 until read) {
@@ -344,8 +396,6 @@ class AndroidAudioEngine(
                                 outBytes[outPos + 1] = ((s ushr 8) and 0xFF).toByte()
                                 outPos += 2
                             }
-                            // trySend на DROP_OLDEST-канале не падает: вытесненный
-                            // старый чанк вернётся в пул через onUndeliveredElement.
                             _micChannel.trySend(MicAudioChunk(outBytes, outPos, pool))
                         }
                         read == 0 -> yield()
@@ -382,6 +432,7 @@ class AndroidAudioEngine(
             runCatching { agc?.enabled = false; agc?.release() }; autoGainControl = null
             runCatching { rec?.release() }; audioRecord = null
         }
+        micGateClosedNow = false
         logger.d("Capture stopped")
     }
 
@@ -434,6 +485,7 @@ class AndroidAudioEngine(
         runCatching { track.setVolume(playbackGain) }
         isFirstBatch = true
         awaitingDrain = false
+        lastTrackWriteAtMs = 0L
         droppedPlaybackChunks.set(0L)
         lastUnderrunCount = 0
         track.play()
@@ -496,6 +548,8 @@ class AndroidAudioEngine(
             if (written < 0) { logger.e("AudioTrack.write error: $written"); return false }
             offset += written
         }
+        // Метка для полудуплексного гейта: «звук сейчас выходит из динамика».
+        lastTrackWriteAtMs = System.currentTimeMillis()
         maybeLogUnderruns(track)
         return true
     }
@@ -557,6 +611,8 @@ class AndroidAudioEngine(
             runCatching { t.flush() }
             runCatching { t.play() }
         }
+        // Гейт микрофона отпускаем сразу — звук физически остановлен.
+        lastTrackWriteAtMs = 0L
         if (drained > 0) logger.d("flushPlayback drained=$drained")
     }
 
@@ -587,6 +643,7 @@ class AndroidAudioEngine(
 
         isFirstBatch = true
         awaitingDrain = false
+        lastTrackWriteAtMs = 0L
         logger.d("Engine released")
     }
 }
